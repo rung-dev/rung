@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "CLI_ERROR",
+    "message": "error: --mode-a and --mode-b are mutually exclusive"
+  }
+}

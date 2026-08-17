@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # No install step: the gate is stdlib-only by design. The package lives
+      # under src/rung, so drive it as a module with src/ on PYTHONPATH (the
+      # test suites put src/ on sys.path themselves).
+      - name: Adversarial regression suite
+        run: python -m unittest discover -s gate -p 'test_*.py' -v
+
+      - name: Gate every worked case (must pass at its declared tier)
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          for b in cases/*/bundle.json; do
+            echo "::group::$b"
+            python -m rung.gate "$b"
+            echo "::endgroup::"
+          done
+
+      - name: Self-report trap must block at high tier
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          for b in cases/*/bundle.json; do
+            if python -m rung.gate "$b" --tier high; then
+              echo "FAIL: $b passed at high tier without a cross-lab attestation"
+              exit 1
+            fi
+          done
+          echo "OK: all cases block at high tier (self-report trap holds)"
+
+      - name: Validate the bundle schema is well-formed JSON Schema
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          s = json.loads(pathlib.Path("schema/evidence-bundle-v1.schema.json").read_text())
+          assert s.get("$schema", "").endswith("2020-12/schema"), "unexpected $schema"
+          print("schema parses; $id:", s.get("$id"))
+          PY

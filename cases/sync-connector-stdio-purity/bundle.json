@@ -1,0 +1,61 @@
+{
+  "schema": "evidence-bundle/v1",
+  "change": {
+    "repo": "«redacted»: a hosted-calendar sync connector exposed to AI assistants over a standard tool-calling protocol",
+    "s1": "1111111",
+    "s0": "0000000",
+    "diff_range": "0000000..1111111",
+    "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
+    "created_at": "2026-08-16",
+    "policy_ref": "rung-policy/v1#default"
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "The server's first stdout line is a valid JSON-RPC frame: no logging-library banner precedes the protocol stream, so a strict client can parse the initialize response.",
+      "risk_tier": "medium",
+      "surface": {
+        "kind": "server",
+        "transport": "stdio newline-delimited JSON-RPC",
+        "how_reached": "piped a credentials-free initialize handshake to the built fat JAR under `timeout`; read raw stdout exactly as a client would"
+      },
+      "rung": 4,
+      "context": "author",
+      "how_established": "Built the fat JAR at S0 and S1 in isolated detached git worktrees (JDK-21 toolchain override applied identically to both; the defect is runtime stdout behaviour, unaffected by target-bytecode version). Drove each with a credentials-free initialize handshake; captured raw stdout; compared line 1. No account, no network calendar op. The captured frame PAYLOADS are genericized for anonymization (identifying protocol/version/tool fields redacted); the byte-level property under test (line 1 parses as JSON at S1 and does NOT at S0) is preserved verbatim.",
+      "artifacts": [
+        {
+          "id": "a_s0",
+          "role": "s0_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s0.stdout",
+          "sha256": "490112a00deb7c2d419497b7d6420f3d1f6475e6cab75b843210dbefbe6f401a",
+          "summary": "line 1 = 'kotlin-logging: initializing... active logger factory: Slf4jLoggerFactory' (NOT valid JSON); the initialize frame is pushed to line 2"
+        },
+        {
+          "id": "a_s1",
+          "role": "s1_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s1.stdout",
+          "sha256": "4256d155b2a7f92c9058715f8d6a886b5e090073fb12873b822bdf63985c11a6",
+          "summary": "line 1 = the valid JSON-RPC initialize result frame; the stream parses cleanly"
+        }
+      ],
+      "differential": {
+        "probe": "java -jar <fatjar> < initialize.jsonl   # no credentials; inspect stdout line 1",
+        "s0_observed": "line 1 is 'kotlin-logging: initializing...', not valid JSON; a strict JSON-RPC parse of frame 1 fails",
+        "s1_observed": "line 1 is the valid JSON-RPC initialize result frame; the stream parses cleanly",
+        "observed_delta": "the banner is removed from stdout; frame 1 goes from unparseable to a valid protocol frame"
+      },
+      "verdict": "pass",
+      "attestation": null
+    }
+  ],
+  "gaps": [
+    {
+      "id": "g1",
+      "severity": "advisory",
+      "desc": "Only the credentials-free protocol handshake was driven at the real surface. Live calendar operations (read and write) were not exercised.",
+      "why_unverified": "they are auth-gated (provider app-password, 2FA-provisioned) and the write/update/delete paths mutate real cloud data; the right rung for those is a labelled mock rung or rung 0; see the case README."
+    }
+  ]
+}

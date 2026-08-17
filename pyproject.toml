@@ -1,0 +1,67 @@
+[build-system]
+# hatchling is a BUILD-TIME tool only; it is never a runtime import and does not
+# violate the stdlib-only, dependency-free runtime contract (see dependencies).
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# Distribution name is rung-ai: plain "rung" is prohibited on PyPI. The import
+# package and the console command both stay "rung" (see [project.scripts]).
+name = "rung-ai"
+description = "A verification-evidence framework: shared vocabulary, evidence-bundle schema, declarative policy, and a deterministic stdlib-only gate."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "rung-dev" }]
+keywords = ["verification", "evidence", "provenance", "gate", "policy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# The runtime is stdlib-only and dependency-free, forever. A change that needs a
+# third-party runtime dependency does not belong in this package.
+dependencies = []
+# Single-sourced from src/rung/__init__.py (__version__); see [tool.hatch.version].
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/rung-dev/rung"
+Repository = "https://github.com/rung-dev/rung"
+
+[project.scripts]
+# The console-script wrapper calls main() with no args; main() reads sys.argv[1:]
+# itself, so the installed `rung` command and `python -m rung.cli` agree, and the
+# 0/30/2 exit-code contract survives the wrapper.
+rung = "rung.cli:main"
+
+[tool.hatch.version]
+path = "src/rung/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+# src/ layout: the importable package is src/rung. hatchling ships all files
+# under the package directory, so data/default_policy.json (the bundled default
+# policy resolved via importlib.resources) and data/schema/ (optional reference
+# material) travel with the wheel.
+packages = ["src/rung"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/rung",
+    "README.md",
+    "VERIFYING-RUNG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "policy",
+    "schema",
+    "cases",
+    "skill",
+]

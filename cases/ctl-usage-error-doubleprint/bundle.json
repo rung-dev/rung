@@ -1,0 +1,60 @@
+{
+  "schema": "evidence-bundle/v1",
+  "change": {
+    "repo": "a *ctl-style CLI control plane for a proprietary enterprise backend (Node/TypeScript, commander)",
+    "s0": "parent of the fix (baseline)",
+    "s1": "the fix",
+    "diff_range": "S0..S1 (2 files: the shared CLI error handler + one help string)",
+    "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
+    "policy_ref": "rung-policy/v1#default"
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "On a usage error in human (non-JSON) mode, the error message is printed once, not multiple times.",
+      "risk_tier": "medium",
+      "surface": { "kind": "cli", "transport": "stderr", "how_reached": "ran the built binary with two mutually-exclusive flags; captured raw stderr and exit code" },
+      "rung": 4,
+      "context": "author",
+      "expected_delta": "change",
+      "how_established": "Built S0 and S1 in isolated detached git worktrees (working repo untouched), sharing the same node_modules. Drove each with a credentials-free usage error (two mutually-exclusive flags on one subcommand) that the CLI framework rejects BEFORE any backend connection is resolved. Captured raw stderr + exit code. Flag/command/tool nouns are genericized for anonymization; the byte-level property under test (how many times the message appears) is preserved verbatim.",
+      "artifacts": [
+        { "id": "h0", "role": "s0_capture", "media": "text/plain", "uri": "artifacts/human-s0.stderr", "sha256": "211d987dd98b6d7a9b1ac2ab06f197dd873c81d266e9782c0b7aa90d55525d7a", "summary": "S0 stderr: message appears 3x (framework's own line + the tool's re-logged ✗ summary and indented Error: detail)" },
+        { "id": "h1", "role": "s1_capture", "media": "text/plain", "uri": "artifacts/human-s1.stderr", "sha256": "13f162d83e05991084a228303f4a20fa37b4db953837ea7046e1086a7af7cc6f", "summary": "S1 stderr: message appears 1x (framework's own line only)" }
+      ],
+      "differential": {
+        "probe": "toolctl resource list --mode-a --mode-b   (two mutually-exclusive flags)",
+        "s0_observed": "stderr: message printed 3 times; exit 2",
+        "s1_observed": "stderr: message printed 1 time; exit 2",
+        "observed_delta": "human-mode usage error de-duplicated (3 prints -> 1); exit code unchanged (2)"
+      },
+      "verdict": "pass",
+      "attestation": null
+    },
+    {
+      "id": "c2",
+      "claim": "The fix does NOT change the machine channel: in --json mode a usage error still emits the identical structured {ok:false,error} on stdout and still exits 2.",
+      "risk_tier": "medium",
+      "surface": { "kind": "cli", "transport": "stdout (--json)", "how_reached": "same invocation with --json; captured raw stdout and exit code" },
+      "rung": 4,
+      "context": "author",
+      "expected_delta": "invariance",
+      "how_established": "Same two builds, same credentials-free usage error, adding --json. Captured raw stdout + exit code at S0 and S1. This is an INVARIANCE claim: the fix targets only the human channel, so the correct rung-4 evidence is that the machine channel is UNCHANGED. The two stdout captures are byte-identical (same sha256), which is the invariance shown at the real surface.",
+      "artifacts": [
+        { "id": "j0", "role": "s0_capture", "media": "application/json", "uri": "artifacts/json-s0.stdout", "sha256": "a4b426e94b38f03d3b6215cb9f4135005e75b9b9fbd9ccd4cb43b27177a2d922", "summary": "S0 --json stdout: {ok:false,error:{code:CLI_ERROR,...}}" },
+        { "id": "j1", "role": "s1_capture", "media": "application/json", "uri": "artifacts/json-s1.stdout", "sha256": "a4b426e94b38f03d3b6215cb9f4135005e75b9b9fbd9ccd4cb43b27177a2d922", "summary": "S1 --json stdout: byte-identical to S0" }
+      ],
+      "differential": {
+        "probe": "toolctl resource list --mode-a --mode-b --json   (same usage error, machine channel)",
+        "s0_observed": "{ok:false,error:{code:CLI_ERROR}}; exit 2",
+        "s1_observed": "{ok:false,error:{code:CLI_ERROR}}; exit 2",
+        "observed_delta": "none; stdout byte-identical, exit 2 unchanged (invariance holds)"
+      },
+      "verdict": "pass",
+      "attestation": null
+    }
+  ],
+  "gaps": [
+    { "id": "g1", "severity": "advisory", "desc": "Only ONE class of usage error (framework-native mutually-exclusive flags) was driven at the surface. Other usage errors the same handler now suppresses (unknown option, invalid choice, missing required argument) were reasoned about from the shared code path but not each driven end-to-end.", "why_unverified": "one representative framework-error path exercises the changed branch; enumerating every command's usage errors was out of the timebox" }
+  ]
+}

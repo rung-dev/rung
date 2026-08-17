@@ -1,0 +1,39 @@
+{
+  "schema": "evidence-bundle/v1",
+  "change": {
+    "repo": "the iCalendar (RFC 5545) export library of a privacy-focused open-source calendar app (pure-JVM Kotlin module)",
+    "s0": "parent of the fix (baseline)",
+    "s1": "the fix",
+    "diff_range": "S0..S1 (the generator: CR normalization in the TEXT escaper + routing VALARM text fields through it)",
+    "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
+    "policy_ref": "rung-policy/v1#default"
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "Emitted iCalendar TEXT values are RFC 5545-clean: a lone/CRLF carriage return in an event DESCRIPTION is normalized to an escaped newline (no bare CR survives), and VALARM DESCRIPTION/SUMMARY/RELATED-TO have their commas, semicolons, and backslashes escaped.",
+      "risk_tier": "medium",
+      "surface": { "kind": "library", "transport": "public generate() API -> emitted VCALENDAR string", "how_reached": "compiled the module at S0 and S1, called the public generator through its package boundary with adversarial input, captured the emitted bytes" },
+      "rung": 4,
+      "context": "author",
+      "expected_delta": "change",
+      "how_established": "Built the calendar export module at S0 and S1 in isolated detached git worktrees (working repo untouched), compiling main sources directly with the cached Kotlin compiler + ical4j classpath (no Android SDK, no app, no network). Drove the PUBLIC generate() API (not the private escaper) with an event whose DESCRIPTION carries a CRLF and a lone CR, plus a DISPLAY VALARM whose text fields carry comma/semicolon/backslash. Captured the emitted VCALENDAR string at both commits. The only non-deterministic fields (DTSTAMP time, generated UIDs) were normalized to «redacted» IDENTICALLY in both captures, so the artifact diff is exactly the fix; the byte-level properties under test (lone-CR count; escaping of the three VALARM TEXT lines) are preserved verbatim.",
+      "artifacts": [
+        { "id": "s0", "role": "s0_capture", "media": "text/calendar", "uri": "artifacts/s0.ics", "sha256": "2698377dd1ba2d271247d615a10b2fca124d4eff6b44bd251715418f16d17d20", "summary": "S0: DESCRIPTION contains 2 bare CRs; VALARM text emitted raw (unescaped comma/semicolon/backslash)" },
+        { "id": "s1", "role": "s1_capture", "media": "text/calendar", "uri": "artifacts/s1.ics", "sha256": "67278967d8662e6ae46497c7d5b00b46d12014988721a84aa3e1da9098987905", "summary": "S1: 0 bare CRs (all normalized to \\n); VALARM text fully escaped" }
+      ],
+      "differential": {
+        "probe": "generate(event with DESCRIPTION 'line one\\r\\nline two\\rline three' + DISPLAY VALARM with comma/semicolon/backslash in its text)",
+        "s0_observed": "DESCRIPTION has 2 lone CRs; VALARM DESCRIPTION/SUMMARY/RELATED-TO unescaped",
+        "s1_observed": "0 lone CRs; VALARM DESCRIPTION/SUMMARY/RELATED-TO escaped",
+        "observed_delta": "bare-CR count 2 -> 0 in DESCRIPTION; three VALARM TEXT properties now escaped"
+      },
+      "verdict": "pass",
+      "attestation": null
+    }
+  ],
+  "gaps": [
+    { "id": "g1", "severity": "advisory", "desc": "The REAL end-user surface is the app's 'Export / Share .ics' action in the Android GUI; only the library boundary (the generator's public API) was driven. The wiring from the export button through to the generator was not exercised, so a defect BETWEEN the GUI and this library (wrong event assembled, export not invoked, file not shared) would not be caught here.", "why_unverified": "no Android emulator/device in this environment and the app is read-only; driving the GUI export flow is out of scope. The right rung for the GUI surface is undriven (rung 0)." },
+    { "id": "g2", "severity": "advisory", "desc": "One representative adversarial input was driven. RFC 5545 TEXT has other edge cases (e.g. a trailing backslash, mixed CR/LF ordering, non-ASCII adjacent to escapes) not each exercised at the surface.", "why_unverified": "one input covers the changed branch; exhaustive TEXT-grammar fuzzing was out of the timebox" }
+  ]
+}

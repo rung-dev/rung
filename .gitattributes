@@ -1,0 +1,14 @@
+# The gate stamps every verdict with `gate_sha256`, a hash of gate.py's own
+# source bytes. Force LF so that self-hash is identical on every platform and
+# checkout (a CRLF checkout would otherwise produce a different gate_sha256).
+*.py text eol=lf
+
+# Line-ending normalization for docs and config. These do not feed any hash
+# (policy_sha256 hashes re-serialized JSON, not file bytes), so this is hygiene.
+*.md   text eol=lf
+*.json text eol=lf
+
+# Captured evidence artifacts are content-addressed: their sha256 is recorded in
+# the bundle and recomputed by the gate. Never normalize their bytes, or the
+# recorded hashes stop matching and the cases break.
+cases/**/artifacts/** -text

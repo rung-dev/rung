@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local dogfooding evidence (may contain real captures; never committed)
+evidence/
+
+# Default `rung run` output dir (captures; regenerated per run)
+rung-out/
+
+# Local agent tooling and instructions (kept out of the public repo)
+.claude/
+CLAUDE.md
+
+# Local docs / research notes: scratch and working material, never published.
+docs/

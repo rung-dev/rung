@@ -1,0 +1,2 @@
+kotlin-logging: initializing... active logger factory: Slf4jLoggerFactory
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"«redacted»","capabilities":{},"serverInfo":{"name":"sync-connector","version":"«redacted»"}}}
