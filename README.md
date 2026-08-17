@@ -107,6 +107,10 @@ rung gate cases/sync-connector-stdio-purity/bundle.json
 pip install rung-ai
 ```
 
+On a modern system Python where a bare `pip install` is refused with
+`externally-managed-environment`, install the CLI in its own isolated
+environment with [pipx](https://pipx.pypa.io) instead: `pipx install rung-ai`.
+
 The distribution is named `rung-ai` on PyPI; the import package and the installed
 command are both `rung`. Installing puts a single
 `rung` command on your PATH:
@@ -274,6 +278,24 @@ input exits `2`. In CI, fail the build on anything that is not exit `0` (both
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) does exactly this. Pin
 your `policy.json` too: a structurally valid policy can still be toothless (see
 [Threat model and limitations](#threat-model-and-limitations)).
+
+In GitHub Actions you can skip the install step and gate a bundle with the
+action directly (it installs a pinned `rung-ai` and runs the gate; the job fails
+unless the gate passes):
+
+```yaml
+- uses: rung-dev/rung@v0.1.1
+  with:
+    bundle: cases/sync-connector-stdio-purity/bundle.json
+    # policy: policy/default.json   # optional; omit for the bundled default
+```
+
+A pinned container is published to GHCR on each release; its exit code is the
+gate verdict, so it drops into any runner that pulls an image:
+
+```bash
+docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.1.1 gate bundle.json
+```
 
 ## Witnessing a run with `rung run`
 

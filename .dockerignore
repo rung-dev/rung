@@ -1,0 +1,16 @@
+# The Dockerfile copies only named public paths, but keep the build context lean
+# and make doubly sure nothing local or gitignored can enter an image layer.
+.git
+.github
+.claude
+CLAUDE.md
+docs
+evidence
+gate
+cases
+skill
+policy
+schema
+VERIFYING-RUNG.md
+CONTRIBUTING.md
+SECURITY.md

@@ -1,0 +1,45 @@
+# rung gate as a GitHub Action. Installs a pinned rung-ai from PyPI and gates an
+# evidence bundle; the job fails on anything that is not exit 0 (both 30 block and
+# 2 cannot-evaluate fail the build), matching rung's exit-code contract.
+name: rung gate
+description: Gate a rung evidence-bundle/v1 in CI; fails the build unless the gate passes (exit 0).
+author: rung-dev
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  bundle:
+    description: Path to the evidence-bundle/v1 JSON file to gate.
+    required: true
+  policy:
+    description: Path to a policy JSON file. Leave empty to use rung's bundled default policy.
+    required: false
+    default: ""
+  version:
+    description: >-
+      Version of rung-ai to install from PyPI. Pin this to a release you trust;
+      the default tracks the action's own tag.
+    required: false
+    default: "0.1.1"
+
+runs:
+  using: composite
+  steps:
+    # GitHub-hosted runners ship Python 3; rung is stdlib-only so no other deps.
+    - name: Install rung
+      shell: bash
+      env:
+        RUNG_VERSION: ${{ inputs.version }}
+      run: python3 -m pip install --quiet --disable-pip-version-check "rung-ai==${RUNG_VERSION}"
+    - name: Gate the bundle
+      shell: bash
+      env:
+        RUNG_BUNDLE: ${{ inputs.bundle }}
+        RUNG_POLICY: ${{ inputs.policy }}
+      run: |
+        if [ -n "${RUNG_POLICY}" ]; then
+          rung gate "${RUNG_BUNDLE}" "${RUNG_POLICY}"
+        else
+          rung gate "${RUNG_BUNDLE}"
+        fi
