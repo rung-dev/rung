@@ -14,7 +14,7 @@ description: >-
 rung grades *how real* a verification was and *who* checked it, then gates the
 result. It is a shared vocabulary, a portable JSON evidence bundle, a
 declarative policy, and a single deterministic gate. It holds no keys, signs
-nothing, and never phones home; its only I/O is hashing artifacts on disk.
+nothing, and never phones home. The gate's only I/O is hashing artifacts on disk.
 
 ## The two axes
 
@@ -28,7 +28,7 @@ Verification claims collapse two questions into one word. rung pulls them apart.
 | 1 | Import the unit and call it |
 | 2 | Test suite green |
 | 3 | Drove the real surface and observed it |
-| 4 | Drove the surface AND captured a baseline vs candidate differential (S0 vs S1) consistent with the change |
+| 4 | Drove the surface twice and captured an S0/S1 pair whose delta matches the declared polarity: they differ for a `change` claim, byte-identical for an `invariance` (no-regression) claim |
 
 **CONTEXT: who evaluated.** `author` (the producer), `fresh-blind` (an
 independent reviewer with no producer state), `cross-lab` (an independent

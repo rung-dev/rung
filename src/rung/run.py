@@ -71,7 +71,7 @@ env can surface in a capture; `--env-clear` runs the probe with a scrubbed,
 minimal environment (PATH, HOME, locale, TERM, TMPDIR) to reduce that leakage.
 
 Policy is loaded, parsed, AND hash-pinned BEFORE the probe executes, and the
-pinned bytes are re-verified after the run (RUN-T1): the code being judged cannot
+pinned bytes are re-verified after the run: the code being judged cannot
 swap the policy out from under its own gate. A mid-run change to the policy file
 is a block, not a silent honoring of the new policy.
 
@@ -99,10 +99,29 @@ PROVENANCE_HASH_CAP = 512 * 1024 * 1024
 # silently dropped. Matches the gate's MAX_ARTIFACT_BYTES so a capture that the
 # gate would refuse to hash never reaches it in the first place. Operators can
 # tune it down for constrained environments via RUNG_MAX_CAPTURE_BYTES.
-MAX_CAPTURE_BYTES = int(os.environ.get("RUNG_MAX_CAPTURE_BYTES", 64 * 1024 * 1024))
+def _parse_capture_cap() -> tuple[int, str | None]:
+    """Read RUNG_MAX_CAPTURE_BYTES defensively at import: a malformed value must
+    never crash the module (exit 1 traceback). Return (cap, error); on a bad
+    value keep the default cap and carry an error string main() turns into a
+    clean exit 2, so a bad knob fails closed rather than being silently honored
+    or silently ignored."""
+    default = 64 * 1024 * 1024
+    raw = os.environ.get("RUNG_MAX_CAPTURE_BYTES")
+    if raw is None:
+        return default, None
+    try:
+        val = int(raw)
+    except ValueError:
+        return default, f"RUNG_MAX_CAPTURE_BYTES must be an integer, got {raw!r}"
+    if val <= 0:
+        return default, f"RUNG_MAX_CAPTURE_BYTES must be > 0, got {val}"
+    return val, None
+
+
+MAX_CAPTURE_BYTES, _CAPTURE_CAP_ERROR = _parse_capture_cap()
 # The drain reads fixed-size chunks (not whole lines) so a newline-free or
 # long-line stream cannot buffer unbounded bytes before the cap check runs; each
-# read is bounded to this many bytes regardless of where newlines fall (RUN-D1).
+# read is bounded to this many bytes regardless of where newlines fall.
 CHUNK_BYTES = 65536
 # Env keys kept when --env-clear is set: enough to launch and be locale-stable,
 # nothing that typically carries a secret (tokens, keys, cloud creds).
@@ -174,7 +193,7 @@ def _parse(opts: list[str]) -> argparse.Namespace:
     p.add_argument("--env-clear", action="store_true",
                    help="Run the probe with a scrubbed, minimal environment (PATH, HOME, locale, TERM, TMPDIR) "
                         "instead of inheriting this process's env, so operator secrets in the env "
-                        "do not leak into a capture (RUN-I1). Redaction of the captured bytes is "
+                        "do not leak into a capture. Redaction of the captured bytes is "
                         "still an operator responsibility.")
     p.add_argument("--no-gate", action="store_true", help="Emit the bundle but do not run the gate.")
     return p.parse_args(opts)
@@ -195,7 +214,7 @@ def _run_probe(argv, stdin_bytes, timeout, expect_frames, until_idle, env=None, 
     runs to completion. Every probe, plain or server, has its memory bounded near
     MAX_CAPTURE_BYTES during the run (the drain reads fixed-size chunks, so even a
     newline-free stream cannot buffer unbounded bytes) and its whole process group
-    reaped on teardown (RUN-D1 / RUN-D2), so a runaway or orphan-spawning probe can
+    reaped on teardown, so a runaway or orphan-spawning probe can
     neither flood RAM nor leak children."""
     return _run_probe_bounded(argv, stdin_bytes, timeout, expect_frames, until_idle, env, cwd)
 
@@ -207,9 +226,9 @@ def _run_probe_bounded(argv, stdin_bytes, timeout, expect_frames, until_idle, en
     or the accumulated capture hitting MAX_CAPTURE_BYTES. With neither framing
     flag set, only exit / timeout / cap can fire, so this runs to completion.
     Memory is bounded inline as fixed-size chunks arrive, so a newline-free or
-    long-line stream cannot flood RAM before the cap check (RUN-D1);
+    long-line stream cannot flood RAM before the cap check;
     start_new_session puts the
-    probe in its own group so the whole tree is killed after capture (RUN-D2).
+    probe in its own group so the whole tree is killed after capture.
     Only the timeout branch is a hang."""
     proc = subprocess.Popen(
         argv,
@@ -226,7 +245,7 @@ def _run_probe_bounded(argv, stdin_bytes, timeout, expect_frames, until_idle, en
             # Read FIXED-SIZE chunks, never whole lines: readline would buffer an
             # entire line (up to the next newline or EOF) in RAM before the cap
             # check below could run, so a probe emitting a long or newline-free
-            # stream could flood memory regardless of MAX_CAPTURE_BYTES (RUN-D1).
+            # stream could flood memory regardless of MAX_CAPTURE_BYTES.
             # A chunked read bounds each step to CHUNK bytes; a "frame" is still a
             # newline, now counted by scanning each chunk. read1 (not read) returns
             # as soon as any data is available from a single underlying read, so a
@@ -235,7 +254,7 @@ def _run_probe_bounded(argv, stdin_bytes, timeout, expect_frames, until_idle, en
             for chunk in iter(lambda: pipe.read1(CHUNK_BYTES), b""):
                 with lock:
                     # Stop accumulating past the cap so memory (and the bundle)
-                    # stay bounded; the drop is recorded as truncation (RUN-D1).
+                    # stay bounded; the drop is recorded as truncation.
                     remaining = MAX_CAPTURE_BYTES - (len(out_buf) + len(err_buf))
                     if remaining <= 0:
                         state["truncated"] = True
@@ -319,7 +338,7 @@ def _run_probe_bounded(argv, stdin_bytes, timeout, expect_frames, until_idle, en
 
 
 def _kill_group(proc) -> None:
-    """Kill the probe's whole process group (RUN-D2). The probe is launched with
+    """Kill the probe's whole process group. The probe is launched with
     start_new_session=True, so it leads its own group; signalling the group takes
     down any children it spawned (a server's workers), not just the leader.
     Falls back cleanly if the group is already gone."""
@@ -450,7 +469,7 @@ def _pin_policy(path: pathlib.Path) -> tuple[dict, str]:
     """Read, hash-pin, and parse the policy from ONE read of the bytes, so the
     hash and the parsed dict describe the exact same file contents. Returns
     (policy_dict, sha256_of_file_bytes) or raises gate.GateInputError. Called
-    BEFORE the probe runs (RUN-T1): the code under test cannot swap the policy
+    BEFORE the probe runs: the code under test cannot swap the policy
     out from under its own gate, and the pinned sha lets a mid-run swap be
     detected rather than silently honored."""
     try:
@@ -470,6 +489,9 @@ def _pin_policy(path: pathlib.Path) -> tuple[dict, str]:
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+    if _CAPTURE_CAP_ERROR:
+        print(f"rung run: {_CAPTURE_CAP_ERROR}", file=sys.stderr)
+        return gate.EXIT_USAGE
     opts_argv, probe = _split_probe(argv)
     ns = _parse(opts_argv)
 
@@ -518,7 +540,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"rung run: cannot read --stdin file {ns.stdin!r}: {e}", file=sys.stderr)
             return gate.EXIT_USAGE
 
-    # Load, parse, AND hash-pin the policy BEFORE the probe executes (RUN-T1), so
+    # Load, parse, AND hash-pin the policy BEFORE the probe executes, so
     # the code being judged cannot swap the policy out from under its own gate.
     # A defect here fails closed to usage, before any code is run. The ExitStack
     # holds the bundled-default-policy materialization (importlib.resources
@@ -578,7 +600,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"zero bytes on stdout/stderr; nothing was observed", file=sys.stderr)
             return gate.EXIT_USAGE
 
-        # A capture truncated at the cap is RECORDED, not silent (RUN-D1): a blocker
+        # A capture truncated at the cap is RECORDED, not silent: a blocker
         # gap so the safe default is to block (the gate blocks it unless a policy
         # explicitly allows dismissing blocker gaps), mirroring the gate's own
         # MAX_ARTIFACT_BYTES rule. Independent of the timeout branch above; a run
@@ -646,8 +668,8 @@ def _finish(bundle: dict, out: pathlib.Path, policy, policy_sha, policy_file,
     policy against the launch-time sha and run the gate, exiting with ITS
     verdict, never the probe's exit code."""
     # Stamp the pinned policy identity into the bundle so a verdict is
-    # attributable to the exact policy bytes that were in force at launch
-    # (RUN-T1). The gate ignores unknown top-level fields, so this is inert to it.
+    # attributable to the exact policy bytes that were in force at launch. The
+    # gate ignores unknown top-level fields, so this is inert to it.
     if policy_sha is not None:
         bundle["policy_pin"] = {"path": str(policy_file), "sha256": policy_sha}
 
@@ -661,7 +683,7 @@ def _finish(bundle: dict, out: pathlib.Path, policy, policy_sha, policy_file,
         return gate.EXIT_PASS
 
     # --- run the gate over what we witnessed; exit with ITS verdict ------------
-    # Re-verify the policy file against the sha pinned at launch (RUN-T1). If the
+    # Re-verify the policy file against the sha pinned at launch. If the
     # bytes changed during the run, the probe (or anything else) may have tried to
     # weaken the gate mid-flight: BLOCK on the tamper rather than honor the new
     # policy. We gate with the PINNED dict regardless, never a re-read of a file
@@ -880,5 +902,20 @@ def _split_sides(probe: list[str]) -> tuple[list[str], list[str] | None]:
     return probe[:i], probe[i + 1:]
 
 
+def _main_cli(argv: list[str] | None = None) -> int:
+    """Standalone entry (`python -m rung.run`). Runs main() but fails closed to
+    exit 2 on any unexpected exception, never a raw traceback; the in-contract
+    0/30/2 exits pass through and argparse's SystemExit is preserved. The `rung
+    run` command routes through the CLI dispatcher, which wraps this the same
+    way, so both paths honor the exit-code contract."""
+    try:
+        return main(argv)
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed, never a raw traceback
+        print(f"rung run: internal error: {type(e).__name__}: {e}", file=sys.stderr)
+        return gate.EXIT_USAGE
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(_main_cli(sys.argv[1:]))

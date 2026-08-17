@@ -5,7 +5,7 @@
 No LLM. No network. Its ONLY I/O is resolving artifact hashes on disk, which
 it treats as fixed input: (bundle, policy) -> same result, always.
 
-Trust model (be precise; see THREAT MODEL in the README):
+Trust model (be precise):
   The gate can only ever *lower* trust RELATIVE TO WHAT THE BUNDLE CLAIMS. A
   claim cannot pass above its own declared rung, and any producer-declared
   verdict is ignored; the gate's printed output is the only verdict. It does
@@ -54,7 +54,7 @@ MAX_INPUT_BYTES = 16 * 1024 * 1024
 
 def _self_sha256() -> str | None:
     """Hash of this gate's own source, so a verdict is attributable to exact
-    logic (see R2 in the STRIDE threat model).
+    logic.
 
     Reads via a plain filesystem read on a normal install (the wheel is
     unzipped to real files), then falls back to the module loader when the
@@ -233,7 +233,7 @@ def gate(bundle: dict, policy: dict, base: pathlib.Path) -> dict:
             reasons.append(f"{cid}: skip not allowed in tier {tier}")
 
         # (3) independence: only cross-lab is a checkable field (presence, not
-        #     authenticity; see THREAT MODEL). fresh-blind cannot be checked.
+        #     authenticity). fresh-blind cannot be checked.
         req = require_context.get(tier)
         if req:
             att = c.get("attestation")
@@ -254,7 +254,7 @@ def gate(bundle: dict, policy: dict, base: pathlib.Path) -> dict:
 
         # (5) artifact integrity: the gate's only I/O. Runs BEFORE the rung-4
         #     polarity check so that check can reason about VERIFIED bytes, not
-        #     the producer's declared observations (see T3 in the threat model).
+        #     the producer's declared observations.
         #     verified_shas maps role -> sorted sha256 of every artifact that
         #     resolved, exists, and matched its declared hash.
         verified_shas: dict[str, list] = {}
@@ -337,7 +337,7 @@ def gate(bundle: dict, policy: dict, base: pathlib.Path) -> dict:
 
 def _policy_sha256(policy) -> str | None:
     """Hash of the resolved policy, so a verdict is attributable to the exact
-    policy that produced it (see R2 in the STRIDE threat model)."""
+    policy that produced it."""
     if not isinstance(policy, dict):
         return None
     canonical = json.dumps(policy, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -365,7 +365,7 @@ def _result(verdict: str, reasons: list, policy: dict, schema) -> dict:
 def _read_json(path: pathlib.Path, what: str):
     """Read and parse a JSON input, failing closed to exit 2 on any defect:
     unreadable, oversized, malformed, non-UTF-8, or pathologically nested
-    (RecursionError), never an uncaught traceback (see D2 in the threat model)."""
+    (RecursionError), never an uncaught traceback."""
     try:
         raw = path.read_bytes()
     except OSError as e:
@@ -444,5 +444,18 @@ def main(argv: list[str] | None = None) -> int:
     return result["exit_code"]
 
 
+def _main_cli(argv: list[str] | None = None) -> int:
+    """Standalone entry (`python -m rung.gate`). Runs main() but fails closed to
+    exit 2 on any unexpected exception, never a raw traceback; the in-contract
+    0/30/2 exits pass through and argparse's SystemExit is preserved."""
+    try:
+        return main(argv)
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed, never a raw traceback
+        print(f"gate: internal error: {type(e).__name__}: {e}", file=sys.stderr)
+        return EXIT_USAGE
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(_main_cli(sys.argv[1:]))

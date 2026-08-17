@@ -359,7 +359,7 @@ class RunConformance(unittest.TestCase):
         self.assertTrue(any(g["severity"] == "blocker" and g["id"] == "timeout" for g in gaps))
 
     def test_default_path_timeout_reaps_process_group(self):
-        # RUN-D2 on the DEFAULT (plain) cli path, not just the server path: a
+        # On the DEFAULT (plain) cli path, not just the server path: a
         # probe that spawns a grandchild and then hangs must have its WHOLE
         # process group reaped on timeout, not just the leader. The grandchild is
         # armed to write a sentinel well after the timeout; a reaped group means
@@ -497,7 +497,7 @@ class RunConformance(unittest.TestCase):
         self.assertNotIn("\n", captured)  # idle fired with no newline in sight
 
     def test_newline_free_output_over_cap_is_bounded_and_blocked(self):
-        # RUN-D1: a newline-free (or very long) stream must not flood RAM before
+        # A newline-free (or very long) stream must not flood RAM before
         # the cap check. The drain reads fixed-size chunks (read1), never whole
         # lines, so the accumulated capture is bounded to MAX_CAPTURE_BYTES even
         # when no newline ever arrives; the truncation is RECORDED as a blocker
@@ -518,7 +518,7 @@ class RunConformance(unittest.TestCase):
         self.assertTrue(any(g["id"] == "capture-truncated" and g["severity"] == "blocker"
                             for g in b.get("gaps", [])))
         # The emitted capture is bounded to the cap despite the newline-free
-        # 200000-byte stream: memory (and the bundle) stayed bounded (RUN-D1).
+        # 200000-byte stream: memory (and the bundle) stayed bounded.
         stdout_art = next(a for a in b["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
         captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_bytes()
@@ -548,7 +548,7 @@ class RunConformance(unittest.TestCase):
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
 
-    # -- RUN-T1: policy is loaded and hash-pinned BEFORE the probe runs ------
+    # -- policy is loaded and hash-pinned BEFORE the probe runs ------
     def permissive_policy(self) -> Path:
         # Passes a rung-3 cli claim: min_rung[low]=1 so the declared rung clears.
         return self.fixture("pol.json", json.dumps({
@@ -562,7 +562,7 @@ class RunConformance(unittest.TestCase):
             "require_context": {}, "no_skip_tiers": [], "allow_dismiss_gaps": False}))
 
     def test_policy_pinned_into_bundle(self):
-        # RUN-T1: the exact policy bytes in force at launch are stamped into the
+        # The exact policy bytes in force at launch are stamped into the
         # bundle so a verdict is attributable to them.
         fix = self.cli_fixture()
         pol = self.permissive_policy()
@@ -575,7 +575,7 @@ class RunConformance(unittest.TestCase):
         self.assertEqual(pin["sha256"], hashlib.sha256(pol.read_bytes()).hexdigest())
 
     def test_probe_cannot_swap_policy_mid_run(self):
-        # RUN-T1 (the headline): a probe that overwrites the policy file to a
+        # The headline: a probe that overwrites the policy file to a
         # permissive one during the run must NOT get the permissive verdict. The
         # gate runs against the PINNED (strict) policy, and the swap is caught and
         # blocked rather than silently honored.
@@ -597,7 +597,7 @@ class RunConformance(unittest.TestCase):
         self.assertIn("changed during the run", r.stdout + r.stderr)
 
     def test_bad_policy_fails_closed_before_probe(self):
-        # RUN-T1: a malformed policy is a usage error caught BEFORE the probe is
+        # A malformed policy is a usage error caught BEFORE the probe is
         # ever launched (fail closed, no code run against a broken gate).
         marker = self.tmp / "probe-ran.marker"
         fix = self.fixture("marker.py",
@@ -610,9 +610,9 @@ class RunConformance(unittest.TestCase):
         self.assertFalse(marker.exists(), "probe must not run when the policy is unloadable")
         self.assertFalse(self.bundle_exists())
 
-    # -- RUN-D1: capture cap + truncation gap -------------------------------
+    # -- capture cap + truncation gap -------------------------------
     def test_capture_truncation_records_blocker_gap(self):
-        # RUN-D1: a probe that floods stdout past the cap is truncated, and the
+        # A probe that floods stdout past the cap is truncated, and the
         # truncation is recorded as an undismissed blocker gap (so it blocks by
         # default) rather than silently dropped.
         # Drive a real flood: emit well over the cap in small lines. To keep the
@@ -640,9 +640,9 @@ class RunConformance(unittest.TestCase):
         # Undismissed blocker under a non-dismissing policy -> gate blocks.
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
 
-    # -- RUN-I1: --env-clear scrubs the probe environment -------------------
+    # -- --env-clear scrubs the probe environment -------------------
     def test_env_clear_scrubs_secret_env(self):
-        # RUN-I1: a secret in the operator env must not reach the probe (and so
+        # A secret in the operator env must not reach the probe (and so
         # cannot leak into a capture) when --env-clear is set.
         leak = self.fixture("leak.py",
                             "import os\nprint('SECRET=' + os.environ.get('MY_SECRET','<absent>'))\n")
@@ -674,6 +674,31 @@ class RunConformance(unittest.TestCase):
                           if a["role"] == "stdout_capture")
         captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
         self.assertIn("topsecret-token", captured)
+
+    def test_bad_capture_cap_env_fails_closed(self):
+        # A malformed RUNG_MAX_CAPTURE_BYTES must fail closed to exit 2 with a
+        # diagnostic naming the variable, never an import-time traceback.
+        for bad in ("not-an-int", "0", "-5"):
+            p = self.run_it("--rung", "0", "--surface", "cli", "--", "true",
+                            env={"RUNG_MAX_CAPTURE_BYTES": bad})
+            self.assertEqual(p.returncode, 2, f"{bad!r}: {p.stderr}")
+            self.assertNotIn("Traceback", p.stderr)
+            self.assertIn("RUNG_MAX_CAPTURE_BYTES", p.stderr)
+
+    def test_internal_exception_fails_closed_to_exit_2(self):
+        # An unexpected exception inside main() must fail closed to exit 2 with a
+        # one-line diagnostic, never a raw traceback, on the standalone module
+        # path (`python -m rung.run`), matching the CLI dispatcher.
+        driver = (
+            "import sys, rung.run as r\n"
+            "r.main = lambda argv=None: (_ for _ in ()).throw(RuntimeError('boom'))\n"
+            "sys.exit(r._main_cli([]))\n"
+        )
+        p = subprocess.run([sys.executable, "-c", driver],
+                           capture_output=True, text=True, env=_env_with_src())
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertIn("internal error", p.stderr)
 
 
 if __name__ == "__main__":

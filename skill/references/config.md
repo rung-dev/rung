@@ -27,8 +27,10 @@ installed package ships its own copy as package data):
   integer floor in `[0, 4]`.
 - `require_context` (object): tiers where independence is mandatory. The only
   mechanically enforceable value is `"cross-lab"`: a claim at that tier blocks
-  unless it declares `context: cross-lab` and the bundle carries an `attestation`
-  whose `lab` differs from `change.producer.lab` and whose `verdict` is `pass`.
+  unless the claim declares `context: cross-lab` and carries its own
+  `attestation` whose `lab` differs from `change.producer.lab` and whose
+  `verdict` is `pass`. Attestation is a per-claim field; a bundle-level one is
+  not read.
   Kept consistent with `min_rung`, this closes the self-report trap (a
   self-reported rung 4 blocks at high/critical until a cross-lab reviewer
   attests).
@@ -39,7 +41,7 @@ installed package ships its own copy as package data):
 
 **Fail-closed.** An unknown or missing key, a non-int `min_rung`, an
 out-of-range floor, an unknown `require_context` value, or a non-list
-`no_skip_tiers` all block or exit 2 rather than shipping with a disabled check.
+`no_skip_tiers` all block rather than shipping with a check disabled.
 **Fail-closed is not fail-strict:** a structurally valid but toothless
 policy (empty `require_context`, all-zero `min_rung`, `allow_dismiss_gaps:true`)
 is accepted, so pinning the policy is an operator responsibility. See
@@ -108,17 +110,19 @@ should know which is which.
   `producer.agent`/`model`.
 - `claim.claim`, `claim.surface.*`, `claim.how_established`.
 - `artifact.media`/`summary`, `differential.probe`/`observed_delta`,
-  `attestation.judge_id`/`note`, `gap.desc`/`why_unverified`.
-- `id` and `gap.desc` appear in the gate's human-readable reason output but are
-  not enforcement inputs.
+  `attestation.judge_id`/`note`, `gap.why_unverified`.
+- `id` and `gap.desc` are advisory too, but appear in the gate's human-readable
+  reason output; they are not enforcement inputs.
 
 ### Artifacts and paths
 
 - `uri` is a path relative to the bundle directory, never absolute. The gate
   resolves it under the bundle dir, rejects any escape or symlink, size-caps the
   read (64 MiB per artifact), and recomputes the sha256.
-- `sha256` (required, `^[0-9a-f]{64}$`): detects post-bundle **mutation** only.
-  It is not evidence the file came from driving a real surface; that is
+- `sha256` (required): the gate recomputes the artifact's hash and blocks on any
+  mismatch or when it is absent, so it detects post-bundle **mutation**. The
+  `^[0-9a-f]{64}$` format is a schema constraint, not a gate check. A matching
+  hash is not evidence the file came from driving a real surface; that is
   judge-only.
 
 ### What the gate trusts on assertion (v1)
@@ -127,4 +131,4 @@ Nothing in the bundle is signed, so the gate detects post-bundle mutation but
 not fabrication: `risk_tier`, `context` (author/fresh-blind), `attestation.lab`,
 `surface.kind`, which claims were declared at all, and two captures fabricated
 *consistently* are all trusted on assertion. These are judge-only concerns until
-signing lands. See the README's Threat model and limitations section.
+signing lands. See `THREAT-MODEL.md` for the full model.

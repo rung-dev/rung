@@ -2,9 +2,8 @@
 
 rung's reference gate (`src/rung/gate.py`) is a deterministic, offline, stdlib-only
 function of `(bundle, policy)` whose only I/O is hashing artifacts on disk. Its
-trust model is in the [Threat model and
-limitations](README.md#threat-model-and-limitations) section of the README;
-please read it before reporting, because the v1 trust boundary is explicit and
+trust model is in [`THREAT-MODEL.md`](THREAT-MODEL.md); please read it before
+reporting, because the v1 trust boundary is explicit and
 several "weaknesses" are documented, by-design limits rather than
 vulnerabilities.
 
@@ -27,8 +26,8 @@ enforce. For example:
 
 ## Out of scope (documented v1 limits, not vulnerabilities)
 
-These are stated plainly in the README's threat model. v1 detects post-bundle
-mutation, not fabrication, and nothing in the bundle is signed:
+These are stated plainly in [`THREAT-MODEL.md`](THREAT-MODEL.md). v1 detects
+post-bundle mutation, not fabrication, and nothing in the bundle is signed:
 
 - A **forged cross-lab attestation**: `attestation.lab` is an unsigned string, so
   a producer-supplied one passes the presence check. This is the headline v1

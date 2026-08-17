@@ -6,6 +6,9 @@ per risk tier, and where independence (context) is required. Using JSON keeps
 one format and parser across bundles and policy, with no third-party dependency
 and no Python 3.11 floor.
 
+The rung ladder (0 to 4) and the contexts (author, fresh-blind, cross-lab) are
+defined in the [README](../README.md#two-axes-how-real-and-who-checked).
+
 ## Fields
 
 | Key | Meaning |

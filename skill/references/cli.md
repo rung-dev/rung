@@ -70,8 +70,8 @@ rung gate <bundle.json> [policy.json] [--tier <tier>]
   default policy is used. Note this is a **positional**, not `--policy`.
 - `--tier <tier>`: override the risk tier used for the run
   (`low` | `medium` | `high` | `critical`). This is the **only** flag `gate`
-  accepts; any other unknown option exits `2` (a quiet fail-open on a typo'd
-  flag is treated as a usage error, not ignored).
+  accepts; any other option exits `2`, so a typo'd flag is a usage error, never
+  silently ignored.
 
 Prints a JSON verdict to stdout and exits `0`/`30`/`2`.
 
@@ -161,7 +161,9 @@ rung run --rung 4 --diff --expect-delta invariance --surface cli --tier medium \
 ```
 
 A capture that exceeds the 64 MiB cap is truncated and recorded as an undismissed
-`capture-truncated` blocker gap; `RUNG_MAX_CAPTURE_BYTES` tunes the cap.
+`capture-truncated` blocker gap; `RUNG_MAX_CAPTURE_BYTES` tunes the cap. A
+non-integer or non-positive value fails closed: `rung run` exits `2` before the
+probe runs, rather than falling back to a default cap.
 
 **Operator note:** `rung run` *executes* its probe, so pointing it at an
 untrusted repo is arbitrary code execution. Keep it to trusted inputs. The gate

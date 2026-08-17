@@ -5,6 +5,10 @@ turn the same question on rung: how real is the verification of rung itself, and
 who did it? This page walks through the checks rung has been through, and what
 each one does and doesn't catch.
 
+The ladder (rungs 0 to 4) and the three contexts (author, fresh-blind,
+cross-lab) are defined in the
+[README](README.md#two-axes-how-real-and-who-checked).
+
 Here's the short version. A blind code review and rungs 0 to 3 all missed the
 bug in the same packaging change (rung 1 blocked, but only on the policy floor,
 not the defect). The only check that caught the bug was the rung-4 differential,

@@ -4,8 +4,6 @@
 Every test here encodes a concrete attack or gap surfaced by the adversarial
 doc review and asserts the gate now handles it. Run:  python3 -m unittest -v
 (from the gate/ dir) or  python3 gate/test_gate.py.  Stdlib only.
-
-Naming: test IDs map to review findings (C3, H3, H6, H8, M1, M2, M3).
 """
 from __future__ import annotations
 import io, os, sys, json, hashlib, pathlib, tempfile, unittest, contextlib, subprocess
@@ -79,8 +77,8 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("mismatch" in x for x in r["reasons"]))
 
-    # --- C3: fail closed on policy ------------------------------------------
-    def test_C3_policy_missing_independence_blocks(self):
+    # --- fail closed on policy ----------------------------------------------
+    def test_policy_missing_independence_blocks(self):
         """A policy that omits an independence key entirely must fail closed:
         it cannot silently ship with the check disabled."""
         bad = dict(GOOD_POLICY)
@@ -88,15 +86,15 @@ class GateCase(unittest.TestCase):
         with self.assertRaises(gate.PolicyError):
             gate.validate_policy(bad)
 
-    def test_C3_typo_key_blocks(self):
+    def test_typo_key_blocks(self):
         bad = dict(GOOD_POLICY)
         del bad["require_context"]
         bad["require_ctx"] = {"high": "cross-lab"}
         with self.assertRaises(gate.PolicyError):
             gate.validate_policy(bad)
 
-    # --- H6: artifact uri path containment ----------------------------------
-    def test_H6_absolute_uri_blocked(self):
+    # --- artifact uri path containment --------------------------------------
+    def test_absolute_uri_blocked(self):
         claim = {"id": "c1", "risk_tier": "medium", "rung": 3, "context": "author",
                  "verdict": "pass",
                  "artifacts": [{"id": "a", "role": "log", "uri": "/etc/hostname",
@@ -105,7 +103,7 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("escape" in x for x in r["reasons"]))
 
-    def test_H6_traversal_uri_blocked(self):
+    def test_traversal_uri_blocked(self):
         claim = {"id": "c1", "risk_tier": "medium", "rung": 3, "context": "author",
                  "verdict": "pass",
                  "artifacts": [{"id": "a", "role": "log", "uri": "../../../../etc/hostname",
@@ -114,15 +112,15 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("escape" in x for x in r["reasons"]))
 
-    # --- H8: schema validation ----------------------------------------------
-    def test_H8_empty_claims_blocks(self):
+    # --- schema validation --------------------------------------------------
+    def test_empty_claims_blocks(self):
         b = self.bundle({"id": "x"})
         b["claims"] = []
         r = self.run_gate(b)
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("no claims" in x for x in r["reasons"]))
 
-    def test_H8_unknown_schema_blocks(self):
+    def test_unknown_schema_blocks(self):
         a0 = self.artifact("s0.txt", "s0_capture", b"x")
         a1 = self.artifact("s1.txt", "s1_capture", b"y")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -133,8 +131,8 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("schema" in x for x in r["reasons"]))
 
-    # --- M1 / M3: evidence is mandatory where load-bearing ------------------
-    def test_M1_unhashed_artifact_blocks(self):
+    # --- evidence is mandatory where load-bearing ---------------------------
+    def test_unhashed_artifact_blocks(self):
         p = self.tmp / "cap.txt"
         p.write_bytes(b"hi")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 3, "context": "author",
@@ -144,15 +142,15 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("no sha256" in x for x in r["reasons"]))
 
-    def test_M3_rung3_without_artifact_blocks(self):
+    def test_rung3_without_artifact_blocks(self):
         claim = {"id": "c1", "risk_tier": "medium", "rung": 3, "context": "author",
                  "verdict": "pass", "artifacts": []}
         r = self.run_gate(self.bundle(claim))
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("requires >=1 capture artifact" in x for x in r["reasons"]))
 
-    # --- H3: invariance polarity --------------------------------------------
-    def test_H3_invariance_passes_when_unchanged(self):
+    # --- invariance polarity ------------------------------------------------
+    def test_invariance_passes_when_unchanged(self):
         a0 = self.artifact("s0.txt", "s0_capture", b"200 OK\n")
         a1 = self.artifact("s1.txt", "s1_capture", b"200 OK\n")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -161,7 +159,7 @@ class GateCase(unittest.TestCase):
                  "differential": {"s0_observed": "200 OK", "s1_observed": "200 OK"}}
         self.assertEqual(self.run_gate(self.bundle(claim))["verdict"], "pass")
 
-    def test_H3_invariance_blocks_on_unexpected_delta(self):
+    def test_invariance_blocks_on_unexpected_delta(self):
         a0 = self.artifact("s0.txt", "s0_capture", b"200 OK\n")
         a1 = self.artifact("s1.txt", "s1_capture", b"500 ERR\n")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -183,8 +181,8 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("no S0/S1 delta" in x for x in r["reasons"]))
 
-    # --- T3: rung-4 polarity is decided by VERIFIED BYTES, not declared text -
-    def test_T3_change_identical_bytes_blocks(self):
+    # --- rung-4 polarity is decided by VERIFIED BYTES, not declared text -
+    def test_change_identical_bytes_blocks(self):
         """A change-claim whose captures are byte-identical must block even when
         the declared differential lies that they differ (the fabrication that
         previously produced a false pass from genuine, hash-matching artifacts)."""
@@ -198,7 +196,7 @@ class GateCase(unittest.TestCase):
         self.assertTrue(any("no S0/S1 delta" in x for x in r["reasons"]))
         self.assertTrue(any("contradicts capture bytes" in x for x in r["reasons"]))
 
-    def test_T3_invariance_differing_bytes_blocks(self):
+    def test_invariance_differing_bytes_blocks(self):
         a0 = self.artifact("s0.txt", "s0_capture", b"A\n")
         a1 = self.artifact("s1.txt", "s1_capture", b"B\n")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -208,7 +206,7 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("unexpected S0/S1 delta" in x for x in r["reasons"]))
 
-    def test_T3_polarity_unverifiable_without_both_captures(self):
+    def test_polarity_unverifiable_without_both_captures(self):
         """rung 4 cannot pass if the capture bytes cannot be compared."""
         a0 = self.artifact("s0.txt", "s0_capture", b"A\n")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -218,8 +216,8 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("polarity unverifiable" in x for x in r["reasons"]))
 
-    # --- T1/T2: rung-4 polarity needs ONE unambiguous pair, not role buckets -
-    def test_T1_duplicate_role_labels_cannot_fake_invariance(self):
+    # --- rung-4 polarity needs ONE unambiguous pair, not role buckets -
+    def test_duplicate_role_labels_cannot_fake_invariance(self):
         """Two genuine, distinct, hash-matching files each labeled BOTH
         s0_capture and s1_capture make the role buckets equal as sorted sets
         (sorted(s0)==sorted(s1)) and used to fake `invariance`. Requiring exactly
@@ -236,7 +234,7 @@ class GateCase(unittest.TestCase):
         self.assertEqual(r["verdict"], "block")
         self.assertTrue(any("polarity unverifiable" in x for x in r["reasons"]))
 
-    def test_T2_padded_extra_capture_cannot_fake_change(self):
+    def test_padded_extra_capture_cannot_fake_change(self):
         """A real no-op (s0 and s1 byte-identical) padded with an extra distinct
         file in the s1 bucket makes sorted(s0) != sorted(s1) and used to fake
         `change`. The exactly-one-per-role rule blocks the padded bucket."""
@@ -278,35 +276,35 @@ class GateCase(unittest.TestCase):
                                    "min_rung": {**GOOD_POLICY["min_rung"], "low": "2"}}))
         self.assertEqual(self._exit([str(p), str(pol)]), gate.EXIT_BLOCK)
 
-    # --- E1: unknown/typo'd CLI flags fail closed to a usage error ----------
-    def test_E1_unknown_flag_is_usage_error(self):
+    # --- unknown/typo'd CLI flags fail closed to a usage error ----------
+    def test_unknown_flag_is_usage_error(self):
         self.assertEqual(self._exit([str(FLAGSHIP), "--bogus"]), gate.EXIT_USAGE)
 
-    def test_E1_typo_tier_flag_is_usage_error(self):
+    def test_typo_tier_flag_is_usage_error(self):
         """A typo'd --teir=high used to be silently dropped, running the gate at
         the bundle-declared tier instead of the intended override."""
         self.assertEqual(self._exit([str(FLAGSHIP), "--teir=high"]), gate.EXIT_USAGE)
 
-    # --- M2: malformed input yields a verdict/usage, never a traceback ------
+    # --- malformed input yields a verdict/usage, never a traceback ----------
     def _exit(self, argv):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return gate.main(argv)
 
-    def test_M2_unknown_tier_is_usage_error(self):
+    def test_unknown_tier_is_usage_error(self):
         self.assertEqual(self._exit([str(FLAGSHIP), "--tier", "bogus"]), gate.EXIT_USAGE)
 
-    def test_M2_trailing_tier_is_usage_error(self):
+    def test_trailing_tier_is_usage_error(self):
         self.assertEqual(self._exit([str(FLAGSHIP), "--tier"]), gate.EXIT_USAGE)
 
-    def test_M2_no_bundle_is_usage_error(self):
+    def test_no_bundle_is_usage_error(self):
         self.assertEqual(self._exit([]), gate.EXIT_USAGE)
 
-    def test_M2_bad_json_is_usage_error(self):
+    def test_bad_json_is_usage_error(self):
         p = self.tmp / "bad.json"
         p.write_text("{not json")
         self.assertEqual(self._exit([str(p)]), gate.EXIT_USAGE)
 
-    def test_M2_missing_verdict_blocks_not_crashes(self):
+    def test_missing_verdict_blocks_not_crashes(self):
         a0 = self.artifact("s0.txt", "s0_capture", b"x")
         a1 = self.artifact("s1.txt", "s1_capture", b"y")
         claim = {"id": "c1", "risk_tier": "medium", "rung": 4, "context": "author",
@@ -319,19 +317,19 @@ class GateCase(unittest.TestCase):
         self.assertEqual(self._exit([str(FLAGSHIP)]), gate.EXIT_PASS)
         self.assertEqual(self._exit([str(FLAGSHIP), "--tier", "high"]), gate.EXIT_BLOCK)
 
-    # --- D2: pathological input fails closed to exit 2, never a traceback ----
-    def test_D2_deeply_nested_json_is_usage_error(self):
+    # --- pathological input fails closed to exit 2, never a traceback ----
+    def test_deeply_nested_json_is_usage_error(self):
         p = self.tmp / "deep.json"
         p.write_text("[" * 20000 + "]" * 20000)
         self.assertEqual(self._exit([str(p)]), gate.EXIT_USAGE)
 
-    def test_D2_oversized_input_is_usage_error(self):
+    def test_oversized_input_is_usage_error(self):
         p = self.tmp / "big.json"
         p.write_bytes(b"[" + b" " * (gate.MAX_INPUT_BYTES + 1) + b"]")
         self.assertEqual(self._exit([str(p)]), gate.EXIT_USAGE)
 
-    # --- R2: the verdict is bound to the exact gate + policy that produced it -
-    def test_R2_verdict_binds_gate_and_policy_hashes(self):
+    # --- the verdict is bound to the exact gate + policy that produced it -
+    def test_verdict_binds_gate_and_policy_hashes(self):
         r = gate.gate(json.loads(FLAGSHIP.read_text()), DEFAULT_POLICY, FLAGSHIP.parent)
         self.assertEqual(len(r["gate_sha256"]), 64)
         self.assertEqual(len(r["policy_sha256"]), 64)
@@ -342,7 +340,7 @@ class GateCase(unittest.TestCase):
 
 
 class SelfHashProvenanceCase(unittest.TestCase):
-    """R2 provenance (`gate_sha256`) must survive the packaging shape. A normal
+    """Provenance (`gate_sha256`) must survive the packaging shape. A normal
     `pip install` unzips the wheel to real files, but running the gate from a
     wheel/zipapp on the path imports it via zipimport, where `__file__` points
     inside the archive and a plain filesystem read fails. The self-hash has to
@@ -448,6 +446,24 @@ class DeterminismCase(unittest.TestCase):
         p.write_text(json.dumps(bundle))
         rc, _ = self._assert_seed_invariant([str(p)])
         self.assertEqual(rc, gate.EXIT_BLOCK)
+
+
+class GateEntryFailClosed(unittest.TestCase):
+    def test_internal_exception_fails_closed_to_exit_2(self):
+        # An unexpected exception from main() (beyond the handled input/policy
+        # errors) must map to exit 2 with a one-line diagnostic, never a raw
+        # traceback, on the standalone `python -m rung.gate` path.
+        orig = gate.main
+        err = io.StringIO()
+        try:
+            gate.main = lambda argv=None: (_ for _ in ()).throw(RuntimeError("boom"))
+            with contextlib.redirect_stderr(err):
+                rc = gate._main_cli([])
+        finally:
+            gate.main = orig
+        self.assertEqual(rc, gate.EXIT_USAGE)
+        self.assertNotIn("Traceback", err.getvalue())
+        self.assertIn("internal error", err.getvalue())
 
 
 if __name__ == "__main__":

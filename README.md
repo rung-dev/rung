@@ -2,106 +2,17 @@
 
 **At which rung did your agent verify?**
 
-rung grades *how real* a verification was and *who* checked it: a shared
-vocabulary, a reference schema, and a deterministic gate.
+rung grades *how real* a verification was and *who* checked it, on two independent
+axes: a RUNG from 0 (reasoning about the code) to 4 (drove the real surface, before
+and after the change), and a CONTEXT from author to cross-lab. It ships a shared
+vocabulary, a reference schema, and a deterministic gate. Jump to what you need:
+[Tutorial](#tutorial) for a first verdict, [How-to](#how-to) for task recipes,
+[Reference](#reference) for the exact fields and policy, [Explanation](#explanation)
+for the two-axis model and the reasoning behind it.
 
-## The problem
+## Tutorial
 
-"Verified" gets used for two different things, and most reports use the one word
-for both. "The tests pass" reads the same as "I ran the actual thing and watched
-it work." "I checked it" reads the same as "someone independent checked it."
-Those aren't the same claim. When they all sound alike, a change nobody ran can
-pass for verified, and there's no shared way to say which one you have.
-
-## Why "rung"
-
-A rung is a step on a ladder. The core axis (0 to 4) is a ladder from reasoning
-about the code up to driving the running surface (the real CLI, server, library
-API, or GUI a user or program touches) and capturing
-what it did. How far you climbed is how real your verification is, and you don't
-get to claim the top while standing on the first. The name keeps the question in
-front of you: which rung did you actually reach?
-
-## Two axes: how real, and who checked
-
-Pull them apart:
-
-**RUNG: how real (0 to 4)**
-
-| Rung | Meaning |
-|-----:|---------|
-| 0 | Read-only reasoning about the code |
-| 1 | Import the unit and call it |
-| 2 | Test suite green |
-| 3 | Drove the real surface and observed it |
-| 4 | Drove the surface **and** captured a baseline->candidate differential (S0 vs S1) consistent with the change |
-
-A rung-4 claim has a polarity: a *change* claim requires S0 and S1 to differ,
-while an *invariance* claim (a refactor, a dep bump, "no egress") requires them
-to match.
-
-**CONTEXT: who evaluated**
-
-| Context | Meaning |
-|---------|---------|
-| author | The producer of the change |
-| fresh-blind | An independent reviewer with no producer state |
-| cross-lab | An independent reviewer at a **different** lab |
-
-Put them on a grid, and the empty cell is the one to look at:
-
-| rung ↓ · context → | author | fresh-blind | cross-lab |
-|---|---|---|---|
-| **2** tests green | generic CI | | |
-| **3** drove the real surface | runtime-verification tools | | |
-| **4** drove + S0/S1 differential | | | ← real *and* independent; what rung targets |
-
-The axes are independent: "drove it blind, cross-lab" is not a higher rung, it is
-a different cell (rung 3 to 4 × cross-lab). Generic CI sits at rung 2 × author,
-and runtime-verification tools reach rung 3 × author: they drive the real surface,
-but the producer still grades its own work. The right-hand column, real
-verification done by someone other than the producer, is where almost nothing
-lives today, and that is the column rung is built to name and reward.
-
-The gate can *check* only one context, **cross-lab**, and only for presence, not
-authenticity: it requires the claim to declare `context: cross-lab` and the
-bundle to carry an attestation whose `lab` differs from the producer's and whose
-`verdict` is `pass`. It does **not** verify that the attestation is authentic
-(nothing is signed in v1; see Threat model). author vs fresh-blind is
-the producer's word, which nothing can check; the gate treats both as "not
-independent."
-
-## What's here
-
-```
-schema/evidence-bundle-v1.schema.json   the portable per-claim record (JSON Schema, draft 2020-12)
-policy/default.json                      declarative ship policy: min rung + independence per risk tier
-src/rung/gate.py                         single-file, stdlib-only, dependency-free: gate(bundle, policy) -> verdict
-src/rung/run.py                          `rung run`: drives a probe, captures its bytes, writes+gates the bundle
-src/rung/cli.py                          the `rung` umbrella command (run / gate / check / doctor / version)
-cases/                                   real, reproducible worked examples
-skill/                                   an agent skill: how to use rung, plus a CLI and config reference
-VERIFYING-RUNG.md                        rung applied to itself: an external blind review, then dogfooding
-```
-
-An **evidence bundle** records, per claim: the rung reached, the context, the
-surface driven, content-addressed artifacts, the S0/S1 differential (for rung
-4), a verdict, and any cross-lab attestation. Gaps are listed in the bundle, not left out.
-`evidence-bundle/v1` is the stable interchange: additive fields stay within v1,
-and a breaking change bumps the major (`/v2`).
-
-The **gate** is a pure function of `(bundle, policy)`. Its only I/O is hashing
-artifacts on disk. It can only ever **lower** trust: a claim cannot pass above
-its own rung, and a producer cannot pass by declaring its own verdict: a declared
-`pass` grants nothing (the gate's own checks are the only thing that can pass a
-claim), while a declared `fail` or `blocked` still blocks. Exit `0` = pass, `30`
-= block.
-
-```bash
-rung gate cases/sync-connector-stdio-purity/bundle.json
-```
-
-## Install
+### Install
 
 ```bash
 pip install rung-ai
@@ -110,6 +21,9 @@ pip install rung-ai
 On a modern system Python where a bare `pip install` is refused with
 `externally-managed-environment`, install the CLI in its own isolated
 environment with [pipx](https://pipx.pypa.io) instead: `pipx install rung-ai`.
+With [uv](https://docs.astral.sh/uv/): `uv tool install rung-ai` puts the `rung`
+command on your PATH, or run it once without installing via `uvx --from rung-ai
+rung gate bundle.json`.
 
 The distribution is named `rung-ai` on PyPI; the import package and the installed
 command are both `rung`. Installing puts a single
@@ -130,107 +44,21 @@ install, the package is self-contained under `src/`: run it from a checkout with
 your own repo. Every `rung gate` / `rung run` example below is the installed
 command; the module form is the drop-in equivalent.
 
-## The default policy
+### Your first verdict
 
-```json
-{
-  "version": 1,
-  "require_context": { "high": "cross-lab", "critical": "cross-lab" },
-  "no_skip_tiers": ["high", "critical"],
-  "allow_dismiss_gaps": false,
-  "min_rung": { "low": 2, "medium": 3, "high": 4, "critical": 4 }
-}
+From a checkout of this repo, gate one of the worked-example bundles:
+
+```bash
+rung gate cases/sync-connector-stdio-purity/bundle.json
 ```
 
-The policy is plain JSON: same format and stdlib parser as the bundles, no
-third-party dependency and no Python 3.11 floor. `min_rung` maps each risk tier
-to the minimum rung to ship, and `require_context` names the tiers where
-independence is mandatory; kept consistent, they close the **self-report trap**
-(a self-reported rung 4 blocks at high/critical until a cross-lab reviewer
-attests). The gate fails closed on an unknown or missing key rather than shipping
-with a disabled check. See [`policy/README.md`](policy/README.md) for the full
-field reference, per-tier calibration rationale, and the self-report-trap detail.
+It prints a JSON verdict and exits `0` (pass) or `30` (block); unreadable or
+malformed input exits `2`. That is the whole surface. To author your own bundle
+instead of gating a shipped one, follow [How to use rung](#how-to-use-rung).
 
-## Enforced vs advisory fields
+## How-to
 
-A schema-valid bundle is **not** necessarily gate-passing. The schema admits many
-fields for humans and tooling; the gate only reads a subset when it decides a
-verdict. Authors should know which is which.
-
-**Enforced** (read by the gate; affect the verdict):
-
-- Top-level: `schema` (must equal `"evidence-bundle/v1"`), `change.producer.lab`,
-  `claims` (non-empty array).
-- Per claim: `risk_tier`, `rung`, `context`, `verdict`, `expected_delta`,
-  `artifacts[]` with each artifact's `role`/`uri`/`sha256`,
-  `differential.s0_observed`/`s1_observed` (cross-checked against capture bytes at
-  rung 4), `attestation.lab`/`attestation.verdict` (required when the policy
-  demands cross-lab for the tier).
-- Rung 4: needs exactly one `s0_capture` and one `s1_capture` artifact (zero,
-  duplicate, or padded captures per role block); polarity (change vs invariance)
-  is decided from that single verified pair of capture bytes.
-- Gaps: `severity`, `dismissed` (an undismissed `blocker` gap blocks unless policy
-  allows dismissal).
-
-**Advisory** (in the schema for humans; the gate does **not** check them):
-
-- `change.repo`/`s0`/`s1`/`diff_range`/`created_at`/`policy_ref`,
-  `producer.agent`/`model`.
-- `claim.claim`, `claim.surface.*`, `claim.how_established`.
-- `artifact.media`/`summary`, `differential.probe`/`observed_delta`,
-  `attestation.judge_id`/`note`, `gap.desc`/`why_unverified`.
-- Note: `id` and `gap.desc` appear in the gate's human-readable reason output but
-  are not enforcement inputs.
-
-Conditional requirements the gate enforces **beyond** the schema: rung >= 3
-requires >= 1 artifact; rung 4 requires exactly one `s0_capture` and one
-`s1_capture` plus a differential with byte-verified polarity; a cross-lab tier
-requires a matching attestation.
-
-## Worked examples
-
-Three real, reproducible cases, each driven at a different surface kind and every
-bundle re-checkable by the gate in this repo:
-
-- [`cases/sync-connector-stdio-purity/`](cases/sync-connector-stdio-purity/):
-  **server (stdio)**, change polarity. A protocol server whose first stdout line
-  was a logging banner instead of a protocol frame. Rungs 0 to 2 all pass it; rung 3
-  catches it by reading byte one off the real stdio surface; rung 4 shows the
-  S0->S1 differential. Carries a declared gap: the auth-gated, data-mutating ops
-  were not driven.
-- [`cases/ctl-usage-error-doubleprint/`](cases/ctl-usage-error-doubleprint/):
-  **CLI**, one commit that exercises **both polarities**. Human-mode stderr
-  *changes* (a usage error printed 3× -> 1×); the `--json` machine channel is
-  *invariant* (byte-identical S0 vs S1, exit 2 both). The invariance claim is the
-  reason `expected_delta` exists: a change-only rung-4 gate would wrongly reject
-  perfectly good evidence for it.
-- [`cases/ical-text-escaping-rfc5545/`](cases/ical-text-escaping-rfc5545/):
-  **library boundary**, change polarity. RFC 5545 TEXT escaping in a calendar
-  export library, driven through the public `generate()` API. Flags up front
-  that the *GUI* export button (the surface a user taps) was not driven.
-
-Each case README shows the exact gate invocations, including the high-tier block
-on a self-reported rung-4 claim.
-
-## When you need the gate
-
-The vocabulary stands on its own. The deterministic gate earns its keep when you
-can't take the producer's word for it:
-
-- **Machine-made claims at volume.** When agents emit "verified" by the hundred
-  and nobody reads each one, you want a fail-closed check that can say "you
-  claimed rung 4 but there's no S0/S1 differential" and mean it. That is the case
-  rung was built for.
-- **Producers who inflate a claim.** A checker matters when the party making the
-  claim benefits from overstating it. A declared `pass` grants nothing, a rung-4
-  claim with no differential is caught, and a change claim whose bytes don't
-  differ blocks. That raises the cost of a bogus claim to fabricating consistent
-  capture bytes, which v1 does not detect (see the threat model); it also catches
-  an innocent mislabel, so it's not only for bad actors.
-- **Automated gating.** If ship/no-ship must block a merge, you need a
-  machine-readable verdict, and vocabulary alone cannot fail a build.
-
-## How to use rung
+### How to use rung
 
 Three steps, none needing a dependency beyond Python 3.9+.
 
@@ -277,14 +105,14 @@ input exits `2`. In CI, fail the build on anything that is not exit `0` (both
 `30` and `2` block). The bundled
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) does exactly this. Pin
 your `policy.json` too: a structurally valid policy can still be toothless (see
-[Threat model and limitations](#threat-model-and-limitations)).
+[`THREAT-MODEL.md`](THREAT-MODEL.md)).
 
 In GitHub Actions you can skip the install step and gate a bundle with the
 action directly (it installs a pinned `rung-ai` and runs the gate; the job fails
 unless the gate passes):
 
 ```yaml
-- uses: rung-dev/rung@v0.1.2
+- uses: rung-dev/rung@v0.2.0
   with:
     bundle: cases/sync-connector-stdio-purity/bundle.json
     # policy: policy/default.json   # optional; omit for the bundled default
@@ -294,10 +122,10 @@ A pinned container is published to GHCR on each release; its exit code is the
 gate verdict, so it drops into any runner that pulls an image:
 
 ```bash
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.1.2 gate bundle.json
+docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.2.0 gate bundle.json
 ```
 
-## Witnessing a run with `rung run`
+### Witnessing a run with `rung run`
 
 `rung run` (`src/rung/run.py`) is the first-class way to earn a rung-3 or rung-4
 bundle; hand-authoring (above) is the fallback for evidence a tool cannot drive.
@@ -397,7 +225,7 @@ and independence, remain judge-only.
 **Operator contract for `rung run`** (in addition to the gate's contract below;
 `rung run` is the more privileged tool because it *executes* the probe):
 
-- **Trusted code only (RUN-E0).** The gate is safe on untrusted input (it only
+- **Trusted code only.** The gate is safe on untrusted input (it only
   hashes files); `rung run` **executes** its probe, so pointing it at an
   adversarial repo is arbitrary code execution. Keep it to trusted inputs. A
   sandboxed production recorder is a separate, privileged tool, not this one.
@@ -406,71 +234,17 @@ and independence, remain judge-only.
   and re-verified after the run: a probe that rewrites the policy file mid-run
   gets a block on the tamper, not a silently weakened gate. You still **pin the
   policy itself** (a structurally valid policy can be toothless).
-- **Only exit 0 is pass (RUN-E2).** `rung run`'s exit is the gate verdict; treat
+- **Only exit 0 is pass.** `rung run`'s exit is the gate verdict; treat
   both 30 (block) and 2 (usage / cannot-evaluate) as no-ship, exactly as for the
   gate.
-- **Redaction and env scrubbing (RUN-I1/I2).** Captures can contain secrets;
+- **Redaction and env scrubbing.** Captures can contain secrets;
   redacting before a bundle is published is an operator responsibility (the tool
   prints a reminder and does not scan). The probe inherits this process's
   environment by default, so a token in the operator env can surface in a
   capture; pass `--env-clear` to run the probe with a scrubbed, minimal
   environment (PATH, HOME, locale, TERM, TMPDIR).
 
-## Threat model and limitations
-
-The gate is a deterministic function of `(bundle, policy)` whose only I/O is
-hashing artifacts on disk. Here is what that gets you, and what it does **not**. For the layered verification rung itself has been through (an external
-blind review, and dogfooding rung on its own packaging, climbing its own ladder), see
-[`VERIFYING-RUNG.md`](VERIFYING-RUNG.md).
-
-**What the gate enforces.** It can only ever *lower* trust relative to what the
-bundle claims. It gives a producer-declared `pass` no weight (its own checks are
-the only thing that can pass a claim) while still blocking on a declared `fail` or
-`blocked`, refuses a claim above its own rung, blocks a self-reported rung-4 at
-high/critical until a cross-lab attestation is present, rejects artifacts whose
-recomputed sha256 doesn't match, and **decides rung-4 polarity from a single
-verified s0/s1 capture pair** (exactly one capture per role; duplicate or padded
-captures block): a fabricated `differential` over genuine-but-identical artifacts
-no longer passes, and declared text that contradicts the bytes blocks.
-It contains artifact paths under the bundle dir (no absolute paths, traversal, or
-symlink escape), size-caps reads, stamps each verdict with the `gate_sha256` and
-`policy_sha256` that produced it, and **fails closed**: unknown/missing policy
-keys, an unknown schema major, empty claims, malformed structure, or oversized /
-pathologically nested input block or exit 2 rather than silently passing (or
-crashing).
-
-**What the gate trusts the producer for (v1).** Nothing in the bundle is signed,
-so the gate detects post-bundle *mutation* but not *fabrication*. A producer who
-lies is not caught by the gate; these are judge-only concerns until signing
-lands. Specifically trusted-on-assertion:
-
-- `risk_tier`: a deflated tier lowers the bar the claim must clear.
-- `context` (`author`/`fresh-blind`): unverifiable; only `cross-lab` presence
-  is checked, and only presence, not authenticity.
-- `attestation.lab` / `attestation.verdict`: an unsigned string; a forged one
-  passes the presence check.
-- `sha256` + `uri`: proves the file wasn't changed *after* bundling, not that
-  it came from driving a real surface.
-- `surface.kind`: whether the thing driven *is* the real consumer surface (vs
-  an internal proxy) is judge-only.
-- *which* claims the producer chose to declare: an omitted claim is invisible.
-- both s0/s1 captures fabricated *consistently*: the byte check catches a lying
-  differential, not two captures forged to agree with each other.
-
-**Operator contract (not enforced by code).** Run a trusted, version-pinned
-`gate.py`, never the subject repo's own copy (that is code execution as the
-judge). Treat **only exit 0 as pass**; both 30 (block) and 2 (cannot-evaluate)
-must fail the build. Redact secrets and normalize non-deterministic fields before
-an artifact enters a publishable bundle. Pin the policy: a structurally valid
-policy can still be toothless.
-
-**v2 direction.** DSSE / in-toto signing over the bundle would move
-`attestation`, producer identity, `risk_tier`, artifact provenance, and the
-verdict record itself from trusted-on-assertion to cryptographically verifiable,
-closing the forged-attestation, Sybil, and non-repudiation gaps. Deliberately out
-of scope for v1 to keep the gate dependency-free.
-
-## Using rung with other tools
+### Using rung with other tools
 
 rung is deliberately narrow: it fixes the vocabulary and bundle format, and ships
 one deterministic check. It defines what counts as having driven the real
@@ -507,7 +281,222 @@ Any producer that emits an `evidence-bundle/v1` and any judge that attests to on
 composes the same way: rung is only the interchange format and the deterministic
 gate between them.
 
-## Prior art
+## Reference
+
+### What's here
+
+```
+schema/evidence-bundle-v1.schema.json   the portable per-claim record (JSON Schema, draft 2020-12)
+policy/default.json                      declarative ship policy: min rung + independence per risk tier
+src/rung/gate.py                         single-file, stdlib-only, dependency-free: gate(bundle, policy) -> verdict
+src/rung/run.py                          `rung run`: drives a probe, captures its bytes, writes+gates the bundle
+src/rung/cli.py                          the `rung` umbrella command (run / gate / check / doctor / version)
+cases/                                   real, reproducible worked examples
+skill/                                   an agent skill: how to use rung, plus a CLI and config reference
+VERIFYING-RUNG.md                        rung applied to itself: an external blind review, then dogfooding
+```
+
+An **evidence bundle** records, per claim: the rung reached, the context, the
+surface driven, content-addressed artifacts, the S0/S1 differential (for rung
+4), a verdict, and any cross-lab attestation. Gaps are listed in the bundle, not left out.
+`evidence-bundle/v1` is the stable interchange: additive fields stay within v1,
+and a breaking change bumps the major (`/v2`).
+
+The **gate** is a pure function of `(bundle, policy)`. Its only I/O is hashing
+artifacts on disk. It can only ever **lower** trust: a claim cannot pass above
+its own rung, and a producer cannot pass by declaring its own verdict: a declared
+`pass` grants nothing (the gate's own checks are the only thing that can pass a
+claim), while a declared `fail` or `blocked` still blocks. Exit `0` = pass, `30`
+= block.
+
+```bash
+rung gate cases/sync-connector-stdio-purity/bundle.json
+```
+
+### The default policy
+
+```json
+{
+  "version": 1,
+  "require_context": { "high": "cross-lab", "critical": "cross-lab" },
+  "no_skip_tiers": ["high", "critical"],
+  "allow_dismiss_gaps": false,
+  "min_rung": { "low": 2, "medium": 3, "high": 4, "critical": 4 }
+}
+```
+
+The policy is plain JSON: same format and stdlib parser as the bundles, no
+third-party dependency and no Python 3.11 floor. `min_rung` maps each risk tier
+to the minimum rung to ship, and `require_context` names the tiers where
+independence is mandatory; kept consistent, they close the **self-report trap**
+(a self-reported rung 4 blocks at high/critical until a cross-lab reviewer
+attests). The gate fails closed on an unknown or missing key rather than shipping
+with a disabled check. See [`policy/README.md`](policy/README.md) for the full
+field reference, per-tier calibration rationale, and the self-report-trap detail.
+
+### Enforced vs advisory fields
+
+A schema-valid bundle is **not** necessarily gate-passing. The schema admits many
+fields for humans and tooling; the gate only reads a subset when it decides a
+verdict. Authors should know which is which.
+
+**Enforced** (read by the gate; affect the verdict):
+
+- Top-level: `schema` (must equal `"evidence-bundle/v1"`), `change.producer.lab`,
+  `claims` (non-empty array).
+- Per claim: `risk_tier`, `rung`, `context`, `verdict`, `expected_delta`,
+  `artifacts[]` with each artifact's `role`/`uri`/`sha256`,
+  `differential.s0_observed`/`s1_observed` (cross-checked against capture bytes at
+  rung 4), `attestation.lab`/`attestation.verdict` (required when the policy
+  demands cross-lab for the tier).
+- Rung 4: needs exactly one `s0_capture` and one `s1_capture` artifact (zero,
+  duplicate, or padded captures per role block); polarity (change vs invariance)
+  is decided from that single verified pair of capture bytes.
+- Gaps: `severity`, `dismissed` (an undismissed `blocker` gap blocks unless policy
+  allows dismissal).
+
+**Advisory** (in the schema for humans; the gate does **not** check them):
+
+- `change.repo`/`s0`/`s1`/`diff_range`/`created_at`/`policy_ref`,
+  `producer.agent`/`model`.
+- `claim.claim`, `claim.surface.*`, `claim.how_established`.
+- `artifact.media`/`summary`, `differential.probe`/`observed_delta`,
+  `attestation.judge_id`/`note`, `gap.desc`/`why_unverified`.
+- Note: `id` and `gap.desc` appear in the gate's human-readable reason output but
+  are not enforcement inputs.
+
+Conditional requirements the gate enforces **beyond** the schema: rung >= 3
+requires >= 1 artifact; rung 4 requires exactly one `s0_capture` and one
+`s1_capture` plus a differential with byte-verified polarity; a cross-lab tier
+requires a matching attestation.
+
+## Explanation
+
+### The problem
+
+"Verified" gets used for two different things, and most reports use the one word
+for both. "The tests pass" reads the same as "I ran the actual thing and watched
+it work." "I checked it" reads the same as "someone independent checked it."
+Those aren't the same claim. When they all sound alike, a change nobody ran can
+pass for verified, and there's no shared way to say which one you have.
+
+### Why "rung"
+
+A rung is a step on a ladder. The core axis (0 to 4) is a ladder from reasoning
+about the code up to driving the running surface (the real CLI, server, library
+API, or GUI a user or program touches) and capturing
+what it did. How far you climbed is how real your verification is, and you don't
+get to claim the top while standing on the first. The name keeps the question in
+front of you: which rung did you actually reach?
+
+### Two axes: how real, and who checked
+
+Pull them apart:
+
+**RUNG: how real (0 to 4)**
+
+| Rung | Meaning |
+|-----:|---------|
+| 0 | Read-only reasoning about the code |
+| 1 | Import the unit and call it |
+| 2 | Test suite green |
+| 3 | Drove the real surface and observed it |
+| 4 | Drove the real surface before and after the change, and compared the two runs (S0 vs S1) to confirm the difference matches the change |
+
+A rung-4 claim comes in two directions. A *change* claim expects the before and
+after to differ; an *invariance* claim (a refactor, a dependency bump, "nothing
+changed") expects them to match.
+
+**CONTEXT: who evaluated**
+
+| Context | Meaning |
+|---------|---------|
+| author | The producer of the change |
+| fresh-blind | An independent reviewer with no producer state |
+| cross-lab | An independent reviewer at a **different** lab |
+
+Put them on a grid, and the empty cell is the one to look at:
+
+| rung ↓ · context → | author | fresh-blind | cross-lab |
+|---|---|---|---|
+| **2** tests green | generic CI | | |
+| **3** drove the real surface | runtime-verification tools | | |
+| **4** drove + S0/S1 differential | | | ← real *and* independent; what rung targets |
+
+The axes are independent: "drove it blind, cross-lab" is not a higher rung, it is
+a different cell (rung 3 to 4 × cross-lab). Generic CI sits at rung 2 × author,
+and runtime-verification tools reach rung 3 × author: they drive the real surface,
+but the producer still grades its own work. The right-hand column, real
+verification done by someone other than the producer, is where almost nothing
+lives today, and that is the column rung is built to name and reward.
+
+The gate can *check* only one context, **cross-lab**, and only for presence, not
+authenticity: it requires the claim to declare `context: cross-lab` and the
+bundle to carry an attestation whose `lab` differs from the producer's and whose
+`verdict` is `pass`. It does **not** verify that the attestation is authentic
+(nothing is signed in v1; see [`THREAT-MODEL.md`](THREAT-MODEL.md)). author vs fresh-blind is
+the producer's word, which nothing can check; the gate treats both as "not
+independent."
+
+### When you need the gate
+
+The vocabulary stands on its own. The deterministic gate earns its keep when you
+can't take the producer's word for it:
+
+- **Machine-made claims at volume.** When agents emit "verified" by the hundred
+  and nobody reads each one, you want a fail-closed check that can say "you
+  claimed rung 4 but there's no S0/S1 differential" and mean it. That is the case
+  rung was built for.
+- **Producers who inflate a claim.** A checker matters when the party making the
+  claim benefits from overstating it. A declared `pass` grants nothing, a rung-4
+  claim with no differential is caught, and a change claim whose bytes don't
+  differ blocks. That raises the cost of a bogus claim to fabricating consistent
+  capture bytes, which v1 does not detect (see [`THREAT-MODEL.md`](THREAT-MODEL.md));
+  it also catches an innocent mislabel, so it's not only for bad actors.
+- **Automated gating.** If ship/no-ship must block a merge, you need a
+  machine-readable verdict, and vocabulary alone cannot fail a build.
+
+### Worked examples
+
+Three real, reproducible cases, each driven at a different surface kind and every
+bundle re-checkable by the gate in this repo:
+
+- [`cases/sync-connector-stdio-purity/`](cases/sync-connector-stdio-purity/):
+  **server (stdio)**, change polarity. A protocol server whose first stdout line
+  was a logging banner instead of a protocol frame. Rungs 0 to 2 all pass it; rung 3
+  catches it by reading byte one off the real stdio surface; rung 4 shows the
+  S0->S1 differential. Carries a declared gap: the auth-gated, data-mutating ops
+  were not driven.
+- [`cases/ctl-usage-error-doubleprint/`](cases/ctl-usage-error-doubleprint/):
+  **CLI**, one commit that exercises **both polarities**. Human-mode stderr
+  *changes* (a usage error printed 3× -> 1×); the `--json` machine channel is
+  *invariant* (byte-identical S0 vs S1, exit 2 both). The invariance claim is the
+  reason `expected_delta` exists: a change-only rung-4 gate would wrongly reject
+  perfectly good evidence for it.
+- [`cases/ical-text-escaping-rfc5545/`](cases/ical-text-escaping-rfc5545/):
+  **library boundary**, change polarity. RFC 5545 TEXT escaping in a calendar
+  export library, driven through the public `generate()` API. Flags up front
+  that the *GUI* export button (the surface a user taps) was not driven.
+
+Each case README shows the exact gate invocations, including the high-tier block
+on a self-reported rung-4 claim.
+
+### Threat model and limitations
+
+The gate is a deterministic function of `(bundle, policy)` whose only I/O is
+hashing artifacts on disk. In short: it can only ever *lower* trust, it detects
+post-bundle mutation but not fabrication, and a handful of properties
+(`risk_tier`, author/fresh-blind context, attestation authenticity, gate
+substitution) are trusted on assertion in v1, by design, until signing lands.
+
+The full model, what the gate enforces, what `rung run` enforces, what is trusted
+on assertion, the distribution/supply-chain boundary, the operator contract, and
+the v2 signing direction, lives in [`THREAT-MODEL.md`](THREAT-MODEL.md). For the
+layered verification rung itself has been through (an external blind review, and
+dogfooding rung on its own packaging), see
+[`VERIFYING-RUNG.md`](VERIFYING-RUNG.md).
+
+### Prior art
 
 The two-axis split is not new; rung names it and makes the cell checkable.
 **GRADE / EBM** already separate the *quality* of evidence from the *strength* of

@@ -25,7 +25,9 @@ A change that weakens one of these will not be merged, however convenient.
 ## Run the tests
 
 ```bash
-cd gate && python3 -m unittest -v        # or: python3 gate/test_gate.py
+python3 gate/test_gate.py     # the gate suite
+python3 gate/test_run.py      # the rung run conformance suite
+cd gate && python3 -m unittest # or run every suite at once
 ```
 
 The suite is adversarial: most tests map to a specific threat-model finding.
@@ -37,9 +39,8 @@ determinism tests (run under several `PYTHONHASHSEED` values) must stay green.
 - **A new worked case.** A real, reproducible example at a surface kind the
   existing cases do not cover. See below.
 - **Gate hardening.** A concrete way to make the gate emit a wrong verdict, plus
-  a regression test that pins the fix. Frame it against the trust boundary in the
-  README's [Threat model and
-  limitations](README.md#threat-model-and-limitations) section.
+  a regression test that pins the fix. Frame it against the trust boundary in
+  [`THREAT-MODEL.md`](THREAT-MODEL.md).
 - **Schema or policy clarification.** See the stability note below.
 - **Docs.** Corrections and clarity. Keep the limitations stated plainly.
 

@@ -99,4 +99,4 @@ claim's intent, and the gate enforces that both ways.
   file." This is the invariance analogue of the general limit that a sha256 proves
   a capture wasn't mutated *after* bundling, not that it came from driving a real
   surface. Confirming that both runs happened is a judge-only concern
-  (see the repo README's Threat Model).
+  (see the repo's `THREAT-MODEL.md`).

@@ -46,7 +46,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 4,
-      "description": "HOW REAL the verification was. 0=read-only reasoning; 1=import-and-call; 2=test-suite green; 3=drove the real surface and observed; 4=drove the surface AND showed a differential (S0 vs S1) that attributes the observed behaviour to the change."
+      "description": "HOW REAL the verification was. 0=read-only reasoning; 1=import-and-call; 2=test-suite green; 3=drove the real surface and observed; 4=drove the surface twice and captured an S0/S1 pair whose delta matches the declared polarity (differ for a change claim, byte-identical for an invariance claim)."
     },
     "context": {
       "type": "string",

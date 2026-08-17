@@ -21,7 +21,7 @@ inputs:
       Version of rung-ai to install from PyPI. Pin this to a release you trust;
       the default tracks the action's own tag.
     required: false
-    default: "0.1.2"
+    default: "0.2.0"
 
 runs:
   using: composite

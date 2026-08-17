@@ -26,3 +26,9 @@ CLAUDE.md
 
 # Local docs / research notes: scratch and working material, never published.
 docs/
+
+# Threat-modeling MCP output: raw working artifacts, may name private projects.
+.threatmodel/
+
+# MCP client config: keep server registrations local, never in the public repo.
+.mcp.json
