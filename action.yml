@@ -1,7 +1,7 @@
 # rung gate as a GitHub Action. Installs a pinned rung-ai from PyPI and gates an
 # evidence bundle; the job fails on anything that is not exit 0 (both 30 block and
 # 2 cannot-evaluate fail the build), matching rung's exit-code contract.
-name: rung-ai
+name: rung gate
 description: Gate a rung evidence-bundle/v1 in CI; fails the build unless the gate passes (exit 0).
 author: rung-dev
 branding:
