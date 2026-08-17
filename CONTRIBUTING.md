@@ -11,8 +11,9 @@ The reference gate (`src/rung/gate.py`) must stay:
 
 - **Dependency-free and stdlib-only.** No third-party imports, no network, no
   Python version floor beyond 3.9. It should drop into any CI unchanged.
-- **A pure function of `(bundle, policy)`.** Its only I/O is hashing artifacts on
-  disk. Same inputs, same verdict, on every platform and hash seed.
+- **A pure function of `(bundle, policy)`.** Its only disk I/O is reading the
+  bundle and policy and re-hashing the artifacts they reference. Same inputs,
+  same verdict, on every platform and hash seed.
 - **Fail-closed.** Unknown or missing policy keys, an unknown schema major, empty
   claims, malformed structure, or unreadable input must block or exit 2. Never a
   silent pass, never an uncaught traceback.

@@ -1,5 +1,10 @@
 # rung
 
+[![PyPI](https://img.shields.io/pypi/v/rung-ai)](https://pypi.org/project/rung-ai/)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://pypi.org/project/rung-ai/)
+[![CI](https://img.shields.io/github/actions/workflow/status/rung-dev/rung/ci.yml?branch=main&label=CI)](https://github.com/rung-dev/rung/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **At which rung did your agent verify?**
 
 rung grades *how real* a verification was and *who* checked it, on two independent
@@ -14,20 +19,26 @@ for the two-axis model and the reasoning behind it.
 
 ### Install
 
+**CLI, on your machine.** The distribution is `rung-ai` on PyPI; the import
+package and the installed command are both `rung`.
+
 ```bash
 pip install rung-ai
 ```
 
-On a modern system Python where a bare `pip install` is refused with
-`externally-managed-environment`, install the CLI in its own isolated
-environment with [pipx](https://pipx.pypa.io) instead: `pipx install rung-ai`.
-With [uv](https://docs.astral.sh/uv/): `uv tool install rung-ai` puts the `rung`
-command on your PATH, or run it once without installing via `uvx --from rung-ai
-rung gate bundle.json`.
+On a system Python that refuses a bare `pip install` with
+`externally-managed-environment`, install into an isolated environment with
+[pipx](https://pipx.pypa.io): `pipx install rung-ai`. With
+[uv](https://docs.astral.sh/uv/): `uv tool install rung-ai` puts `rung` on your
+PATH, or run it once without installing via `uvx --from rung-ai rung gate
+bundle.json`. On macOS or Linux with [Homebrew](https://brew.sh):
 
-The distribution is named `rung-ai` on PyPI; the import package and the installed
-command are both `rung`. Installing puts a single
-`rung` command on your PATH:
+```bash
+brew tap rung-dev/tap
+brew install rung
+```
+
+Installed, `rung` is a single command on your PATH:
 
 ```bash
 rung gate bundle.json          # gate an authored bundle
@@ -36,17 +47,27 @@ rung doctor                    # read-only preflight
 rung version
 ```
 
-The runtime is stdlib-only and dependency-free, and Python 3.9+ is the only
-requirement. If you would rather not
-install, the package is self-contained under `src/`: run it from a checkout with
-`PYTHONPATH=src python3 -m rung.gate bundle.json` (likewise `-m rung.run`,
-`-m rung.cli`), or vendor the single self-contained file `src/rung/gate.py` into
-your own repo. Every `rung gate` / `rung run` example below is the installed
-command; the module form is the drop-in equivalent.
+**Container.** A pinned image is published to the container registry (GHCR) on
+each release; its exit code is the gate verdict, so it drops into any runner that
+can pull an image:
+
+```bash
+docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.2.0 gate bundle.json
+```
+
+**GitHub Actions.** Gate a bundle with no install step; see [wiring it into
+CI](#how-to-use-rung) for the `uses: rung-dev/rung@v0.2.0` recipe.
+
+**No install.** The runtime is stdlib-only, dependency-free, Python 3.9+ only.
+Run from a checkout with `PYTHONPATH=src python3 -m rung.gate bundle.json`
+(likewise `-m rung.run`, `-m rung.cli`), or vendor the single self-contained file
+`src/rung/gate.py` into your own repo. Every `rung gate` / `rung run` example
+below is the installed command; the module form is the drop-in equivalent.
 
 ### Your first verdict
 
-From a checkout of this repo, gate one of the worked-example bundles:
+The worked-example bundles live in the repo, so `git clone
+https://github.com/rung-dev/rung` and gate one from the checkout:
 
 ```bash
 rung gate cases/sync-connector-stdio-purity/bundle.json
@@ -86,7 +107,7 @@ thing that runs is a single low-tier claim with no artifacts:
 ```
 
 Real bundles climb higher: rung 3 and 4 carry capture artifacts with their
-sha256 and, at rung 4, an S0/S1 differential plus `expected_delta`. Rather than
+sha256 and, at rung 4, an S0/S1 (before/after) differential plus `expected_delta`. Rather than
 author those by hand (and hand-type the hashes), let `rung run` drive the
 surface and write the capture-backed bundle for you: `rung run --rung 3` for a
 single-surface witness, `rung run --rung 4 --diff` for the S0/S1 differential
@@ -100,9 +121,8 @@ fields](#enforced-vs-advisory-fields) is the field reference.
 rung gate bundle.json [policy.json]   # default policy if omitted
 ```
 
-It prints a verdict and exits `0` (pass) or `30` (block); unreadable or malformed
-input exits `2`. In CI, fail the build on anything that is not exit `0` (both
-`30` and `2` block). The bundled
+It exits `0` (pass), `30` (block), or `2` (unreadable or malformed input). In CI,
+fail the build on anything that is not exit `0`. The bundled
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) does exactly this. Pin
 your `policy.json` too: a structurally valid policy can still be toothless (see
 [`THREAT-MODEL.md`](THREAT-MODEL.md)).
@@ -118,12 +138,9 @@ unless the gate passes):
     # policy: policy/default.json   # optional; omit for the bundled default
 ```
 
-A pinned container is published to GHCR on each release; its exit code is the
-gate verdict, so it drops into any runner that pulls an image:
-
-```bash
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.2.0 gate bundle.json
-```
+A pinned container image (`ghcr.io/rung-dev/rung`) drops into any runner that can
+pull an image; its exit code is the gate verdict. See [Install](#install) for the
+`docker run` invocation.
 
 ### Witnessing a run with `rung run`
 
@@ -247,9 +264,7 @@ and independence, remain judge-only.
 ### Using rung with other tools
 
 rung is deliberately narrow: it fixes the vocabulary and bundle format, and ships
-one deterministic check. It defines what counts as having driven the real
-surface, records the captured evidence, and grades how real it was. What it leaves to other tools is the rest
-of the chain:
+one deterministic check. What it leaves to other tools is the rest of the chain:
 
 - the machinery that *performs* the drive (reaching the running system is what
   the upper rungs are about: a rung-3 or rung-4 claim does not exist without
@@ -302,12 +317,13 @@ surface driven, content-addressed artifacts, the S0/S1 differential (for rung
 `evidence-bundle/v1` is the stable interchange: additive fields stay within v1,
 and a breaking change bumps the major (`/v2`).
 
-The **gate** is a pure function of `(bundle, policy)`. Its only I/O is hashing
-artifacts on disk. It can only ever **lower** trust: a claim cannot pass above
+The **gate** is a pure function of `(bundle, policy)`. Its only disk I/O is
+reading the bundle and policy and re-hashing the artifacts they reference. It
+can only ever **lower** trust. A claim cannot pass above
 its own rung, and a producer cannot pass by declaring its own verdict: a declared
 `pass` grants nothing (the gate's own checks are the only thing that can pass a
 claim), while a declared `fail` or `blocked` still blocks. Exit `0` = pass, `30`
-= block.
+= block, `2` = unreadable or malformed input.
 
 ```bash
 rung gate cases/sync-connector-stdio-purity/bundle.json
@@ -332,7 +348,7 @@ independence is mandatory; kept consistent, they close the **self-report trap**
 (a self-reported rung 4 blocks at high/critical until a cross-lab reviewer
 attests). The gate fails closed on an unknown or missing key rather than shipping
 with a disabled check. See [`policy/README.md`](policy/README.md) for the full
-field reference, per-tier calibration rationale, and the self-report-trap detail.
+field reference, per-tier calibration rationale, and the self-report trap detail.
 
 ### Enforced vs advisory fields
 
@@ -443,7 +459,7 @@ independent."
 The vocabulary stands on its own. The deterministic gate earns its keep when you
 can't take the producer's word for it:
 
-- **Machine-made claims at volume.** When agents emit "verified" by the hundred
+- **Machine-made claims at volume.** When agents emit "verified" by the hundreds
   and nobody reads each one, you want a fail-closed check that can say "you
   claimed rung 4 but there's no S0/S1 differential" and mean it. That is the case
   rung was built for.
@@ -465,7 +481,7 @@ bundle re-checkable by the gate in this repo:
   **server (stdio)**, change polarity. A protocol server whose first stdout line
   was a logging banner instead of a protocol frame. Rungs 0 to 2 all pass it; rung 3
   catches it by reading byte one off the real stdio surface; rung 4 shows the
-  S0->S1 differential. Carries a declared gap: the auth-gated, data-mutating ops
+  S0/S1 differential. Carries a declared gap: the auth-gated, data-mutating ops
   were not driven.
 - [`cases/ctl-usage-error-doubleprint/`](cases/ctl-usage-error-doubleprint/):
   **CLI**, one commit that exercises **both polarities**. Human-mode stderr
@@ -483,8 +499,9 @@ on a self-reported rung-4 claim.
 
 ### Threat model and limitations
 
-The gate is a deterministic function of `(bundle, policy)` whose only I/O is
-hashing artifacts on disk. In short: it can only ever *lower* trust, it detects
+The gate is a deterministic function of `(bundle, policy)` whose only disk I/O is
+reading the bundle and policy and re-hashing the artifacts they reference. In
+short: it can only ever *lower* trust, it detects
 post-bundle mutation but not fabrication, and a handful of properties
 (`risk_tier`, author/fresh-blind context, attestation authenticity, gate
 substitution) are trusted on assertion in v1, by design, until signing lands.

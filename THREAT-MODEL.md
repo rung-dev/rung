@@ -1,7 +1,9 @@
 # rung threat model and limitations
 
 rung is a deterministic gate that reduces `(bundle, policy)` to a ship/no-ship
-verdict and can only ever *lower* trust. This document states what the gate
+verdict. It can only ever *lower* the trust a bundle claims for itself: a declared
+`pass` grants nothing, and every check it adds is a reason to block, never a reason
+to pass. This document states what the gate
 enforces, what the `rung run` witness enforces, what both trust on assertion in
 v1, and where the trust boundaries sit. It expands the summary in the
 [README](README.md#threat-model-and-limitations). For the layered verification
@@ -10,8 +12,9 @@ its own packaging), see [`VERIFYING-RUNG.md`](VERIFYING-RUNG.md).
 
 ## Posture
 
-The gate is a pure function of `(bundle, policy)`; its only I/O is hashing
-artifacts on disk. It never executes the subject, never reaches the network, and
+The gate is a pure function of `(bundle, policy)`; its only disk I/O is reading
+the bundle and policy and re-hashing the artifacts they reference. It never
+executes the subject, never reaches the network, and
 holds no keys. Every check it adds is a new *block* reason, never a new pass: a
 producer-declared `pass` grants nothing, and the gate's own checks are the only
 thing that can pass a claim.

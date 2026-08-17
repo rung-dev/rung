@@ -14,7 +14,8 @@ description: >-
 rung grades *how real* a verification was and *who* checked it, then gates the
 result. It is a shared vocabulary, a portable JSON evidence bundle, a
 declarative policy, and a single deterministic gate. It holds no keys, signs
-nothing, and never phones home. The gate's only I/O is hashing artifacts on disk.
+nothing, and never phones home. The gate's only disk I/O is reading the bundle
+and policy and re-hashing the artifacts they reference.
 
 ## The two axes
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rung-dev.github.io/schema/evidence-bundle-v1.schema.json",
   "title": "evidence-bundle/v1",
-  "description": "A portable, gate-checkable record of HOW REAL a set of claims about a code change was verified. One bundle per change; one entry per claim. The bundle asserts a rung (how real the verification was) and a context (who evaluated it); a deterministic gate reduces (bundle, policy) to a verdict and can only ever lower trust. Every field here is either gate-enforced or advisory documentation; a schema-valid bundle is NOT necessarily gate-passing, because the gate enforces conditional requirements the schema cannot express. rung>=3 requires at least one artifact; rung 4 requires both s0_capture and s1_capture artifacts plus a differential whose polarity is verified against the capture bytes; a cross-lab tier requires a matching attestation. See the README for the enforced-vs-advisory field table.",
+  "description": "A portable, gate-checkable record of HOW REAL a set of claims about a code change was verified. One bundle per change; one entry per claim. The bundle asserts a rung (how real the verification was) and a context (who evaluated it); a deterministic gate reduces (bundle, policy) to a verdict and can only ever lower trust relative to what the bundle claims. Every field here is either gate-enforced or advisory documentation; a schema-valid bundle is NOT necessarily gate-passing, because the gate enforces conditional requirements the schema cannot express. rung>=3 requires at least one artifact; rung 4 requires both s0_capture and s1_capture artifacts plus a differential whose polarity is verified against the capture bytes; a cross-lab tier requires a matching attestation. See the README for the enforced-vs-advisory field table.",
   "type": "object",
   "required": ["schema", "change", "claims"],
   "additionalProperties": false,
@@ -46,7 +46,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 4,
-      "description": "HOW REAL the verification was. 0=read-only reasoning; 1=import-and-call; 2=test-suite green; 3=drove the real surface and observed; 4=drove the surface AND showed a differential (S0 vs S1) that attributes the observed behaviour to the change."
+      "description": "HOW REAL the verification was. 0=read-only reasoning; 1=import-and-call; 2=test-suite green; 3=drove the real surface and observed; 4=drove the surface twice and captured an S0/S1 pair whose delta matches the declared polarity (differ for a change claim, byte-identical for an invariance claim)."
     },
     "context": {
       "type": "string",

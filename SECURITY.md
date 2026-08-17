@@ -1,7 +1,8 @@
 # Security policy
 
 rung's reference gate (`src/rung/gate.py`) is a deterministic, offline, stdlib-only
-function of `(bundle, policy)` whose only I/O is hashing artifacts on disk. Its
+function of `(bundle, policy)` whose only disk I/O is reading the bundle and
+policy and re-hashing the artifacts they reference. Its
 trust model is in [`THREAT-MODEL.md`](THREAT-MODEL.md); please read it before
 reporting, because the v1 trust boundary is explicit and
 several "weaknesses" are documented, by-design limits rather than
