@@ -284,7 +284,7 @@ action directly (it installs a pinned `rung-ai` and runs the gate; the job fails
 unless the gate passes):
 
 ```yaml
-- uses: rung-dev/rung@v0.1.1
+- uses: rung-dev/rung@v0.1.2
   with:
     bundle: cases/sync-connector-stdio-purity/bundle.json
     # policy: policy/default.json   # optional; omit for the bundled default
@@ -294,7 +294,7 @@ A pinned container is published to GHCR on each release; its exit code is the
 gate verdict, so it drops into any runner that pulls an image:
 
 ```bash
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.1.1 gate bundle.json
+docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.1.2 gate bundle.json
 ```
 
 ## Witnessing a run with `rung run`
