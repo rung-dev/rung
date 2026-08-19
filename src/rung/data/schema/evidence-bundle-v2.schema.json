@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rung-dev.github.io/schema/evidence-bundle-v2.schema.json",
+  "title": "evidence-bundle/v2",
+  "description": "A portable, gate-checkable record of HOW REAL a set of claims about a code change was verified. One bundle per change; one entry per claim. Each claim asserts a rung (how real: 0 not-runtime-observed, 1 observed), a method (how evaluated: single/differential/adversarial/fuzz/property), and a context (who checked: author/independent); a deterministic gate reduces (bundle, policy) to a verdict and can only ever lower trust relative to what the bundle claims. Every field here is either gate-enforced or advisory documentation; a schema-valid bundle is NOT necessarily gate-passing, because the gate enforces conditional requirements the schema cannot express. rung 1 requires at least one artifact; method=differential requires both s0_capture and s1_capture artifacts plus a differential whose polarity is verified against the capture bytes; a required cross-model or cross-lab qualifier requires context=independent plus a matching attestation. See the README for the enforced-vs-advisory field table.",
+  "type": "object",
+  "required": ["schema", "change", "claims"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "evidence-bundle/v2" },
+    "change": {
+      "type": "object",
+      "required": ["repo", "s0", "s1", "producer"],
+      "additionalProperties": true,
+      "properties": {
+        "repo": { "type": "string", "description": "Human description of the surface under change. May be redacted." },
+        "s0": { "type": "string", "description": "Baseline ref (pre-change): the state the differential is measured AGAINST." },
+        "s1": { "type": "string", "description": "Candidate ref (post-change): the state being verified." },
+        "diff_range": { "type": "string" },
+        "producer": {
+          "type": "object",
+          "required": ["lab"],
+          "additionalProperties": true,
+          "properties": {
+            "agent": { "type": "string" },
+            "model": { "type": "string", "description": "Producing model. The cross-model qualifier is defined relative to this value." },
+            "lab": { "type": "string", "description": "Producing lab/org. The cross-lab qualifier is defined relative to this value." }
+          }
+        },
+        "created_at": { "type": "string" },
+        "policy_ref": { "type": "string" }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "gaps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/gap" }
+    },
+    "policy_pin": {
+      "type": "object",
+      "description": "Advisory record of the exact policy bytes in force when `rung run` produced the bundle, so a verdict is attributable to that policy. Stamped by the producer; the gate ignores it (it re-reads and hashes the policy it is actually given).",
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+  "$defs": {
+    "rung": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "HOW REAL the verification was. 0=not a runtime observation of the real surface (read-only reasoning, unit import-and-call, test-suite green, and static/formal verification all collapse here; the shortfall is recorded as a gap, never a grade). 1=observed: drove the real surface (cli/server/gui/library/agent/ci) and captured its final behaviour. Separate from method and context."
+    },
+    "method": {
+      "type": "string",
+      "enum": ["single", "differential", "adversarial", "fuzz", "property"],
+      "default": "single",
+      "description": "HOW the observation was evaluated. Separate from rung and context. 'single'=one plain observation. 'differential'=drove the surface twice and captured an S0/S1 pair whose delta matches the declared polarity. ENFORCED: the gate byte-compares the captures and requires rung 1. 'adversarial'/'fuzz'/'property'=advisory stances, recorded and surfaced to a human reader but never gate-enforced (no mechanical anchor)."
+    },
+    "context": {
+      "type": "string",
+      "enum": ["author", "independent"],
+      "description": "WHO evaluated, as a 2-value ladder of independence (weakest to strongest): author=the producer; independent=a blind reviewer that is not the producer and never saw the producer's reasoning/verdict. Separate from rung. A policy's require_context is satisfied by any context at least this independent. cross-model / cross-lab are NOT higher contexts. They are independence QUALIFIERS on an independent review, demanded by the policy's require_cross_model / require_cross_lab keys and carried in the attestation (a reviewer model/lab that differs from the producer, verdict=pass). Structural presence is not proof the review happened or was truly blind (judge-only / signing concern)."
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail", "blocked", "skip"]
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["id", "role", "uri", "sha256"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "role": {
+          "type": "string",
+          "description": "e.g. s0_capture, s1_capture, screenshot, response_body, log. method=differential requires both s0_capture and s1_capture."
+        },
+        "media": { "type": "string" },
+        "uri": { "type": "string", "description": "Path relative to the bundle (never absolute). The gate resolves it under the bundle dir, rejects any escape/symlink, size-caps the read, and hashes it. sha256 detects post-bundle MUTATION only; it is not evidence the file was produced by driving a real surface (that is judge-only)." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Content hash, REQUIRED. The gate recomputes and rejects on mismatch or when absent for a required artifact." },
+        "summary": { "type": "string" }
+      }
+    },
+    "differential": {
+      "type": "object",
+      "required": ["s0_observed", "s1_observed"],
+      "additionalProperties": true,
+      "properties": {
+        "probe": { "type": "string", "description": "The exact action taken identically against S0 and S1." },
+        "s0_observed": { "type": "string" },
+        "s1_observed": { "type": "string" },
+        "observed_delta": { "type": "string" }
+      }
+    },
+    "attestation": {
+      "description": "Independent-review record carrying the independence QUALIFIERS. The gate enforces qualifier-conditional requirements the schema cannot express: a required cross-lab qualifier needs `lab` present and != change.producer.lab with verdict=pass; a required cross-model qualifier needs a `panel` (or a single `model`) naming >=1 reviewer model, each != change.producer.model, each verdict=pass. Both also require context=independent.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["verdict"],
+          "additionalProperties": true,
+          "properties": {
+            "lab": { "type": "string", "description": "Attesting lab. For a required cross-lab qualifier the gate requires this != change.producer.lab." },
+            "model": { "type": "string", "description": "Reviewer model for a single-reviewer cross-model qualifier; the gate requires this != change.producer.model. For >1 reviewer use `panel`." },
+            "panel": {
+              "type": "array",
+              "description": "Multi-reviewer cross-model panel. The gate requires every entry's model != change.producer.model and verdict=pass.",
+              "items": {
+                "type": "object",
+                "required": ["model", "verdict"],
+                "additionalProperties": true,
+                "properties": {
+                  "model": { "type": "string" },
+                  "verdict": { "$ref": "#/$defs/verdict" }
+                }
+              }
+            },
+            "judge_id": { "type": "string" },
+            "verdict": { "$ref": "#/$defs/verdict" },
+            "note": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "claim": {
+      "type": "object",
+      "required": ["id", "claim", "risk_tier", "rung", "context", "verdict"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "claim": { "type": "string" },
+        "risk_tier": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "surface": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["cli", "server", "gui", "library", "agent", "ci"],
+              "description": "The class of real consumer surface. Whether the thing driven IS the real surface (vs an internal proxy) is judge-only; the gate does not verify it."
+            },
+            "transport": { "type": "string" },
+            "how_reached": { "type": "string" }
+          }
+        },
+        "rung": { "$ref": "#/$defs/rung" },
+        "method": { "$ref": "#/$defs/method" },
+        "expected_delta": {
+          "type": "string",
+          "enum": ["change", "invariance"],
+          "default": "change",
+          "description": "Claim polarity, used by method=differential. 'change' (default): the change is meant to alter surface behaviour, so the differential must show S0!=S1. 'invariance': the change must NOT alter observable behaviour (refactor, dep bump, 'output unchanged', 'no network calls'), so the correct differential evidence is S0==S1 at the surface."
+        },
+        "context": { "$ref": "#/$defs/context" },
+        "how_established": { "type": "string" },
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } },
+        "differential": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/differential" }
+          ]
+        },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "attestation": { "$ref": "#/$defs/attestation" }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "required": ["id", "severity", "desc"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "severity": { "type": "string", "enum": ["advisory", "blocker"] },
+        "desc": { "type": "string" },
+        "why_unverified": { "type": "string" },
+        "dismissed": { "type": "boolean", "description": "An undismissed blocker gap blocks unless the policy sets allow_dismiss_gaps:true; a gap marked dismissed:true does not block." }
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schema": "evidence-bundle/v2",
+  "change": {
+    "repo": "rung itself: the gate's verdict on a fixed input bundle",
+    "s0": "the committed gate run under PYTHONHASHSEED=0",
+    "s1": "the same committed gate run under PYTHONHASHSEED=1",
+    "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "rung-dev" },
+    "created_at": "2026-08-19",
+    "policy_ref": "rung-policy/v2#default"
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "rung gate's verdict is deterministic: gating the same committed bundle produces byte-identical output regardless of Python's hash-seed. Dict/set ordering inside the gate does not leak into the verdict a reviewer re-checks.",
+      "risk_tier": "low",
+      "surface": {
+        "kind": "cli",
+        "how_reached": "rung run --diff --diff-channel both direct-exec of `rung gate <flagship bundle>` twice, once under PYTHONHASHSEED=0 and once under PYTHONHASHSEED=1; captured each run's stdout+stderr; the gate, not this tool, decides the delta polarity from the captured bytes"
+      },
+      "rung": 1,
+      "method": "differential",
+      "expected_delta": "invariance",
+      "context": "author",
+      "how_established": "Ran the installed rung gate over gate/cases/sync-connector-stdio-purity/bundle.json under two PYTHONHASHSEED values via `rung run --rung 1 --surface cli --diff --expect-delta invariance --diff-channel both`. Each side was run twice for byte-stability before the compare. The captured verdict is machine-portable (it carries content-derived hashes and the resolved policy, no filesystem paths), so the exact bytes below re-gate identically on any box.",
+      "artifacts": [
+        {
+          "id": "a_s0",
+          "role": "s0_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s0.stdout",
+          "sha256": "c1dc47434cb490c8a9e68a48c01f1f131297d8fc4aa920efde06cd5858258bbc",
+          "summary": "gate verdict under PYTHONHASHSEED=0: verdict=pass, gate_sha256 and policy_sha256 pinned, reasons=[]"
+        },
+        {
+          "id": "a_s1",
+          "role": "s1_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s1.stdout",
+          "sha256": "c1dc47434cb490c8a9e68a48c01f1f131297d8fc4aa920efde06cd5858258bbc",
+          "summary": "gate verdict under PYTHONHASHSEED=1: byte-identical to s0"
+        }
+      ],
+      "differential": {
+        "probe": "env PYTHONHASHSEED=<n> rung gate gate/cases/sync-connector-stdio-purity/bundle.json   # compare stdout+stderr across n",
+        "channel": "both",
+        "expected_delta": "invariance",
+        "s0_observed": "c1dc47434cb490c8a9e68a48c01f1f131297d8fc4aa920efde06cd5858258bbc",
+        "s1_observed": "c1dc47434cb490c8a9e68a48c01f1f131297d8fc4aa920efde06cd5858258bbc",
+        "observed_delta": "none: the compared channels are byte-for-byte equal (identical sha256), so the claimed invariance holds",
+        "note": "s0_observed / s1_observed are the sha256 of each side's captured bytes; the gate decides the polarity from the verified capture artifacts, this block is the human-readable record."
+      },
+      "verdict": "pass",
+      "attestation": null
+    }
+  ],
+  "gaps": [
+    {
+      "id": "g1",
+      "severity": "advisory",
+      "desc": "Two hash-seeds were exercised, not the full space of interpreter and platform variation.",
+      "why_unverified": "hash-seed is the cheap, load-bearing source of dict/set-ordering nondeterminism in this gate; broader interpreter/OS variation is a separate, larger sweep. This case pins the property that motivated the check, not a proof of universal determinism."
+    }
+  ]
+}

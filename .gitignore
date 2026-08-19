@@ -18,7 +18,7 @@ dist/
 evidence/
 
 # Default `rung run` output dir (captures; regenerated per run)
-rung-out/
+.rung/
 
 # Local agent tooling and instructions (kept out of the public repo)
 .claude/

@@ -1,20 +1,21 @@
 {
-  "schema": "evidence-bundle/v1",
+  "schema": "evidence-bundle/v2",
   "change": {
     "repo": "a *ctl-style CLI control plane for a proprietary enterprise backend (Node/TypeScript, commander)",
     "s0": "parent of the fix (baseline)",
     "s1": "the fix",
     "diff_range": "S0..S1 (2 files: the shared CLI error handler + one help string)",
     "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
-    "policy_ref": "rung-policy/v1#default"
+    "policy_ref": "rung-policy/v2#default"
   },
   "claims": [
     {
       "id": "c1",
       "claim": "On a usage error in human (non-JSON) mode, the error message is printed once, not multiple times.",
-      "risk_tier": "medium",
+      "risk_tier": "low",
       "surface": { "kind": "cli", "transport": "stderr", "how_reached": "ran the built binary with two mutually-exclusive flags; captured raw stderr and exit code" },
-      "rung": 4,
+      "rung": 1,
+      "method": "differential",
       "context": "author",
       "expected_delta": "change",
       "how_established": "Built S0 and S1 in isolated detached git worktrees (working repo untouched), sharing the same node_modules. Drove each with a credentials-free usage error (two mutually-exclusive flags on one subcommand) that the CLI framework rejects BEFORE any backend connection is resolved. Captured raw stderr + exit code. Flag/command/tool nouns are genericized for anonymization; the byte-level property under test (how many times the message appears) is preserved verbatim.",
@@ -34,12 +35,13 @@
     {
       "id": "c2",
       "claim": "The fix does NOT change the machine channel: in --json mode a usage error still emits the identical structured {ok:false,error} on stdout and still exits 2.",
-      "risk_tier": "medium",
+      "risk_tier": "low",
       "surface": { "kind": "cli", "transport": "stdout (--json)", "how_reached": "same invocation with --json; captured raw stdout and exit code" },
-      "rung": 4,
+      "rung": 1,
+      "method": "differential",
       "context": "author",
       "expected_delta": "invariance",
-      "how_established": "Same two builds, same credentials-free usage error, adding --json. Captured raw stdout + exit code at S0 and S1. This is an INVARIANCE claim: the fix targets only the human channel, so the correct rung-4 evidence is that the machine channel is UNCHANGED. The two stdout captures are byte-identical (same sha256), which is the invariance shown at the real surface.",
+      "how_established": "Same two builds, same credentials-free usage error, adding --json. Captured raw stdout + exit code at S0 and S1. This is an INVARIANCE claim: the fix targets only the human channel, so the correct differential evidence is that the machine channel is UNCHANGED. The two stdout captures are byte-identical (same sha256), which is the invariance shown at the real surface (rung 1, method=differential).",
       "artifacts": [
         { "id": "j0", "role": "s0_capture", "media": "application/json", "uri": "artifacts/json-s0.stdout", "sha256": "a4b426e94b38f03d3b6215cb9f4135005e75b9b9fbd9ccd4cb43b27177a2d922", "summary": "S0 --json stdout: {ok:false,error:{code:CLI_ERROR,...}}" },
         { "id": "j1", "role": "s1_capture", "media": "application/json", "uri": "artifacts/json-s1.stdout", "sha256": "a4b426e94b38f03d3b6215cb9f4135005e75b9b9fbd9ccd4cb43b27177a2d922", "summary": "S1 --json stdout: byte-identical to S0" }

@@ -7,8 +7,9 @@ surfaces to prove the wrapper's contract:
   * it emits a gate-passing bundle when a real surface is DECLARED and driven;
   * its exit code is the GATE's verdict, never the probe's exit code;
   * it never launders unwitnessed activity up a rung (bare run emits nothing;
-    a declared low rung stays low);
-  * it refuses a run that never launched, and refuses rung 4 (needs two runs).
+    a declared rung 0 stays unobserved);
+  * it refuses a run that never launched, and refuses a differential without
+    --diff (a differential needs two runs).
 """
 import json
 import os
@@ -56,10 +57,10 @@ class RunConformance(unittest.TestCase):
         )
 
     def bundle(self) -> dict:
-        return json.loads((self.tmp / "rung-out" / "bundle.json").read_text())
+        return json.loads((self.tmp / ".rung" / "output" / "bundle.json").read_text())
 
     def bundle_exists(self) -> bool:
-        return (self.tmp / "rung-out" / "bundle.json").exists()
+        return (self.tmp / ".rung" / "output" / "bundle.json").exists()
 
     # A CLI fixture that mimics the ctl case: prints an error to stderr and
     # exits 2. Exit 2 is CORRECT, pass-worthy behavior, not a failure.
@@ -71,72 +72,80 @@ class RunConformance(unittest.TestCase):
 
     # -- tests --------------------------------------------------------------
     def test_cli_surface_declared_passes(self):
+        # An author self-run (context author) clears LOW tier under the default
+        # policy; medium+ would demand an independent review the runner can't mint.
         fix = self.cli_fixture()
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         b = self.bundle()
         c = b["claims"][0]
-        self.assertEqual(c["rung"], 3)
+        self.assertEqual(c["rung"], 1)
+        self.assertEqual(c["method"], "single")
         self.assertEqual(c["context"], "author")
         self.assertEqual(c["surface"]["kind"], "cli")
         # Both captures present and hash-matching (the gate re-verified them,
-        # since it passed at rung 3 which requires >=1 resolvable artifact).
+        # since it passed at rung 1 which requires >=1 resolvable artifact).
         roles = {a["role"] for a in c["artifacts"]}
         self.assertEqual(roles, {"stdout_capture", "stderr_capture"})
 
     def test_exit_code_is_gate_verdict_not_probe(self):
         # The probe exits 2, but the gate PASSES the bundle, so rung run exits 0.
         fix = self.cli_fixture()
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 0, "probe exit 2 must not become the wrapper's exit code")
 
     def test_bare_run_emits_nothing(self):
         # No --rung/--surface: the tool refuses to guess, so no bundle exists
-        # and it can never satisfy a rung-3 policy. This is the headline
+        # and it can never satisfy an observed-rung policy. This is the headline
         # anti-laundering invariant.
         fix = self.fixture("noop.py", "print('ok')\n")
         r = self.run_it("--", sys.executable, str(fix))
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(self.bundle_exists())
 
-    def test_declared_low_rung_stays_low(self):
-        # "tests green" is rung 2. Declared at rung 2, a
-        # medium-tier bar (min_rung 3) BLOCKS it. The tool records rung 2; it
-        # does not launder it up to 3.
+    def test_declared_rung0_stays_unobserved(self):
+        # v2 anti-laundering: rung 0 means "not a runtime observation of the real
+        # surface". Declared at rung 0, the default floor (min_rung >= 1) BLOCKS
+        # it. The tool records rung 0; it does not launder an un-observed check up
+        # into an observation.
         fix = self.fixture("tests.py", "print('3 passed')\n")
-        r = self.run_it("--rung", "2", "--surface", "ci", "--tier", "medium",
+        r = self.run_it("--rung", "0", "--surface", "ci", "--tier", "low",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
-        self.assertEqual(self.bundle()["claims"][0]["rung"], 2)
+        self.assertEqual(self.bundle()["claims"][0]["rung"], 0)
 
     def test_launch_failure_refuses(self):
-        r = self.run_it("--rung", "3", "--surface", "cli",
+        r = self.run_it("--rung", "1", "--surface", "cli",
                         "--", str(self.tmp / "does-not-exist-xyz"))
         self.assertEqual(r.returncode, 2)
         self.assertFalse(self.bundle_exists())
 
-    def test_rung4_refused(self):
+    def test_method_differential_without_diff_refused(self):
+        # A differential cannot come from one run: --method differential without
+        # --diff is refused (no bundle), pointing the operator at --diff.
         fix = self.cli_fixture()
-        r = self.run_it("--rung", "4", "--surface", "cli",
+        r = self.run_it("--rung", "1", "--method", "differential", "--surface", "cli",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 2)
         self.assertFalse(self.bundle_exists())
         self.assertIn("differential", (r.stdout + r.stderr).lower())
+        self.assertIn("--diff", r.stdout + r.stderr)
 
-    # --- rung-4 differential (--diff) --------------------------------------
+    # --- differential (--diff), at rung 1 ----------------------------------
     # The runner captures both sides faithfully and lets the GATE rule the delta
     # polarity from the bytes; it never asserts change/invariance itself.
     def _pyc(self, code: str) -> list:
         return [sys.executable, "-c", code]
 
     def test_diff_change_passes(self):
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "change",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
                         "--", *self._pyc("print('A')"), ":::", *self._pyc("print('B')"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         c = self.bundle()["claims"][0]
-        self.assertEqual(c["rung"], 4)
+        self.assertEqual(c["rung"], 1)
+        self.assertEqual(c["method"], "differential")
         self.assertEqual(c["context"], "author")
         self.assertEqual(c["expected_delta"], "change")
         self.assertEqual(sorted(a["role"] for a in c["artifacts"]),
@@ -147,7 +156,7 @@ class RunConformance(unittest.TestCase):
         self.assertNotEqual(d["s0_observed"], d["s1_observed"])
 
     def test_diff_invariance_passes_on_identical(self):
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "invariance",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "invariance",
                         "--", *self._pyc("print('SAME')"), ":::", *self._pyc("print('SAME')"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.bundle()["claims"][0]["expected_delta"], "invariance")
@@ -155,23 +164,25 @@ class RunConformance(unittest.TestCase):
     def test_diff_change_blocks_on_identical_bytes(self):
         # Two byte-identical captures cannot be minted into a change; the gate
         # blocks on the missing delta (exit 30).
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "change",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
                         "--", *self._pyc("print('SAME')"), ":::", *self._pyc("print('SAME')"))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
 
     def test_diff_invariance_blocks_on_delta(self):
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "invariance",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "invariance",
                         "--", *self._pyc("print('A')"), ":::", *self._pyc("print('B')"))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
 
-    def test_diff_requires_rung4(self):
-        r = self.run_it("--rung", "3", "--surface", "cli", "--diff",
+    def test_diff_requires_rung1(self):
+        # --diff is the differential method at rung 1 (an observation); any other
+        # rung is refused.
+        r = self.run_it("--rung", "0", "--surface", "cli", "--diff",
                         "--", *self._pyc("print('a')"), ":::", *self._pyc("print('b')"))
         self.assertEqual(r.returncode, 2)
         self.assertFalse(self.bundle_exists())
 
     def test_diff_missing_separator_refused(self):
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff",
                         "--", *self._pyc("print('a')"))
         self.assertEqual(r.returncode, 2)
         self.assertFalse(self.bundle_exists())
@@ -182,18 +193,18 @@ class RunConformance(unittest.TestCase):
         # channel stderr reads change. Proves the channel actually routes.
         s0 = self._pyc("import sys; print('OUT'); print('e0', file=sys.stderr)")
         s1 = self._pyc("import sys; print('OUT'); print('e1', file=sys.stderr)")
-        r_inv = self.run_it("--rung", "4", "--surface", "cli", "--diff",
+        r_inv = self.run_it("--rung", "1", "--surface", "cli", "--diff",
                             "--expect-delta", "invariance", "--diff-channel", "stdout",
                             "--out", "o_inv", "--", *s0, ":::", *s1)
         self.assertEqual(r_inv.returncode, 0, r_inv.stdout + r_inv.stderr)
-        r_chg = self.run_it("--rung", "4", "--surface", "cli", "--diff",
+        r_chg = self.run_it("--rung", "1", "--surface", "cli", "--diff",
                             "--expect-delta", "change", "--diff-channel", "stderr",
                             "--out", "o_chg", "--", *s0, ":::", *s1)
         self.assertEqual(r_chg.returncode, 0, r_chg.stdout + r_chg.stderr)
 
     def test_diff_empty_compared_channel_refused(self):
         # A side that writes only stderr offers nothing to diff on stdout.
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--diff-channel", "stdout",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--diff-channel", "stdout",
                         "--", *self._pyc("import sys; print('err', file=sys.stderr)"),
                         ":::", *self._pyc("print('B')"))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -207,7 +218,7 @@ class RunConformance(unittest.TestCase):
         (self.tmp / "da" / "f.txt").write_text("in-a\n")
         (self.tmp / "db").mkdir()
         (self.tmp / "db" / "f.txt").write_text("in-b\n")
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "change",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
                         "--s0-cwd", str(self.tmp / "da"), "--s1-cwd", str(self.tmp / "db"),
                         "--", "cat", "f.txt", ":::", "cat", "f.txt")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -215,7 +226,7 @@ class RunConformance(unittest.TestCase):
     def test_diff_timeout_blocks(self):
         # One side hangs: the timeout blocker gap forces a block even though the
         # completed side differs (a change claim would otherwise pass).
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--timeout", "1",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--timeout", "1",
                         "--", *self._pyc("print('A')"),
                         ":::", *self._pyc("import time; print('B'); time.sleep(30)"))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
@@ -235,7 +246,7 @@ class RunConformance(unittest.TestCase):
         (self.tmp / "da" / "f.txt").write_text("REAL-A\n")
         (self.tmp / "db").mkdir()
         (self.tmp / "db" / "f.txt").write_text("REAL-B\n")
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "change",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
                         "--s0-cwd", str(self.tmp / "da"), "--s1-cwd", str(self.tmp / "db"),
                         "--", "cat", "f.txt", ":::", "cat", "f.txt")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -256,7 +267,7 @@ class RunConformance(unittest.TestCase):
         # side is not self-stable: the runner records a nondeterministic-output
         # blocker gap and blocks (exit 30) instead of minting a spurious change.
         noisy = self._pyc("import time; print(time.time_ns())")
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--expect-delta", "change",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
                         "--", *noisy, ":::", *noisy)
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
         b = self.bundle()
@@ -266,7 +277,7 @@ class RunConformance(unittest.TestCase):
 
     def test_diff_empty_side_refused(self):
         # A bare ':::' with nothing before it is an empty S0 side: refuse, no bundle.
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff",
                         "--", ":::", *self._pyc("print('B')"))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(self.bundle_exists())
@@ -275,7 +286,7 @@ class RunConformance(unittest.TestCase):
     def test_diff_nondir_cwd_refused(self):
         # --s0-cwd must name a directory; a file (or missing path) is refused.
         notdir = self.fixture("afile", "x\n")
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--s0-cwd", str(notdir),
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--s0-cwd", str(notdir),
                         "--", *self._pyc("print('A')"), ":::", *self._pyc("print('B')"))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(self.bundle_exists())
@@ -286,7 +297,7 @@ class RunConformance(unittest.TestCase):
         # stderr breaks an invariance claim that a stdout-only compare would miss.
         s0 = self._pyc("import sys; print('OUT'); print('e0', file=sys.stderr)")
         s1 = self._pyc("import sys; print('OUT'); print('e1', file=sys.stderr)")
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff",
                         "--expect-delta", "invariance", "--diff-channel", "both",
                         "--", *s0, ":::", *s1)
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
@@ -295,7 +306,7 @@ class RunConformance(unittest.TestCase):
         # The differential-only flags are rejected (not silently dropped) on a
         # single run, so an operator who forgets --diff does not get their intent
         # discarded.
-        r = self.run_it("--rung", "3", "--surface", "cli", "--s0-cwd", str(self.tmp),
+        r = self.run_it("--rung", "1", "--surface", "cli", "--s0-cwd", str(self.tmp),
                         "--", *self._pyc("print('A')"))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(self.bundle_exists())
@@ -308,7 +319,7 @@ class RunConformance(unittest.TestCase):
         # not a usage refusal that would hide the hang.
         s0 = self._pyc("import sys; print('err', file=sys.stderr)")  # empty stdout
         s1 = self._pyc("import time; print('B'); time.sleep(30)")    # hangs
-        r = self.run_it("--rung", "4", "--surface", "cli", "--diff", "--diff-channel", "stdout",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--diff-channel", "stdout",
                         "--timeout", "1", "--", *s0, ":::", *s1)
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
         self.assertTrue(self.bundle_exists())
@@ -326,19 +337,19 @@ class RunConformance(unittest.TestCase):
                            "sys.stdin.readline()\n"
                            "sys.stdout.write('{\"jsonrpc\":\"2.0\",\"result\":{}}\\n')\n")
         handshake = self.fixture("hs.json", '{"jsonrpc":"2.0","method":"initialize"}\n')
-        r = self.run_it("--rung", "3", "--surface", "server", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "server", "--tier", "low",
                         "--stdin", str(handshake), "--", sys.executable, str(srv))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stdout_art = next(a for a in self.bundle()["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_text()
         self.assertIn("jsonrpc", captured)
 
-    def test_empty_output_refused_at_rung3(self):
-        # Finding #1: observing nothing is not observation. A rung-3 claim over
-        # a silent probe must not mint a pass.
+    def test_empty_output_refused_at_rung1(self):
+        # Finding #1: observing nothing is not observation. A rung-1 (observed)
+        # claim over a silent probe must not mint a pass.
         fix = self.fixture("silent.py", "pass\n")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(self.bundle_exists())
@@ -352,7 +363,7 @@ class RunConformance(unittest.TestCase):
                            "import sys, time\n"
                            "sys.stdout.write('starting\\n'); sys.stdout.flush()\n"
                            "time.sleep(30)\n")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--timeout", "1", "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
         gaps = self.bundle().get("gaps", [])
@@ -374,7 +385,7 @@ class RunConformance(unittest.TestCase):
             + "sys.stdout.write('started\\n'); sys.stdout.flush()\n"
             "time.sleep(999)\n",
         )
-        r = self.run_it("--rung", "3", "--surface", "cli", "--timeout", "1",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--timeout", "1",
                         "--no-gate", "--", sys.executable, str(probe))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         time.sleep(6)  # outlast the grandchild's 5s arm-delay
@@ -384,7 +395,7 @@ class RunConformance(unittest.TestCase):
     def test_stdin_missing_file_is_distinct_error(self):
         # Finding #4: a missing --stdin file must not be misreported as a failed
         # launch of the probe.
-        r = self.run_it("--rung", "3", "--surface", "server",
+        r = self.run_it("--rung", "1", "--surface", "server",
                         "--stdin", str(self.tmp / "no-such.json"),
                         "--", sys.executable, "-c", "print('hi')")
         self.assertEqual(r.returncode, 2)
@@ -396,7 +407,7 @@ class RunConformance(unittest.TestCase):
         # Finding #3: which program actually ran is recorded (resolved + hash),
         # so a non-subject drive is visible.
         fix = self.cli_fixture()
-        self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                     "--", sys.executable, str(fix))
         ex = self.bundle()["claims"][0]["surface"]["executed"]
         self.assertEqual(ex["resolved"], str(Path(sys.executable)))
@@ -407,7 +418,7 @@ class RunConformance(unittest.TestCase):
         # not the completed-but-silent "nothing observed" refusal. Same event
         # (zero bytes) but a different, truer cause than a probe that just exits.
         fix = self.fixture("silenthang.py", "import time\ntime.sleep(30)\n")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--timeout", "1", "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
         self.assertTrue(self.bundle_exists())
@@ -425,9 +436,9 @@ class RunConformance(unittest.TestCase):
                            "sys.stdout.write('starting\\n'); sys.stdout.flush()\n"
                            "time.sleep(30)\n")
         pol = self.fixture("permissive.json", json.dumps({
-            "version": 1, "min_rung": {"low": 2, "medium": 3, "high": 4, "critical": 4},
+            "version": 2, "min_rung": {"low": 1, "medium": 1, "high": 1, "critical": 1},
             "require_context": {}, "no_skip_tiers": [], "allow_dismiss_gaps": True}))
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--timeout", "1", "--policy", str(pol),
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
@@ -444,7 +455,7 @@ class RunConformance(unittest.TestCase):
                            "sys.stdout.flush()\n"
                            "time.sleep(30)\n")
         hs = self.fixture("hs.json", '{"jsonrpc":"2.0","method":"initialize"}\n')
-        r = self.run_it("--rung", "3", "--surface", "server", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "server", "--tier", "low",
                         "--expect-frames", "1", "--stdin", str(hs), "--timeout", "10",
                         "--", sys.executable, str(srv))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -452,7 +463,7 @@ class RunConformance(unittest.TestCase):
         self.assertEqual(b.get("gaps", []), [])
         stdout_art = next(a for a in b["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_text()
         self.assertIn("jsonrpc", captured)
 
     def test_server_until_idle_passes(self):
@@ -464,7 +475,7 @@ class RunConformance(unittest.TestCase):
                            "sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
                            "time.sleep(30)\n")
         hs = self.fixture("hs2.txt", "hello\n")
-        r = self.run_it("--rung", "3", "--surface", "server", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "server", "--tier", "low",
                         "--until-idle", "0.5", "--stdin", str(hs), "--timeout", "10",
                         "--", sys.executable, str(srv))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -484,7 +495,7 @@ class RunConformance(unittest.TestCase):
                            "sys.stdout.write('READY-NO-NEWLINE'); sys.stdout.flush()\n"
                            "time.sleep(30)\n")
         hs = self.fixture("hs_nonl.txt", "hello\n")
-        r = self.run_it("--rung", "3", "--surface", "server", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "server", "--tier", "low",
                         "--until-idle", "0.5", "--stdin", str(hs), "--timeout", "10",
                         "--", sys.executable, str(srv))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -492,7 +503,7 @@ class RunConformance(unittest.TestCase):
         self.assertEqual(b.get("gaps", []), [])
         stdout_art = next(a for a in b["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_text()
         self.assertEqual(captured, "READY-NO-NEWLINE")
         self.assertNotIn("\n", captured)  # idle fired with no newline in sight
 
@@ -509,7 +520,7 @@ class RunConformance(unittest.TestCase):
         fix = self.fixture("flood_nonl.py",
                            "import sys\n"
                            f"sys.stdout.write({blob!r}); sys.stdout.flush()\n")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--", sys.executable, str(fix),
                         env={"RUNG_MAX_CAPTURE_BYTES": str(cap)})
         # A recorded truncation is a blocker gap, so the gate blocks (exit 30).
@@ -521,7 +532,7 @@ class RunConformance(unittest.TestCase):
         # 200000-byte stream: memory (and the bundle) stayed bounded.
         stdout_art = next(a for a in b["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_bytes()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_bytes()
         self.assertLessEqual(len(captured), cap)
         self.assertNotIn(b"\n", captured)
 
@@ -531,7 +542,7 @@ class RunConformance(unittest.TestCase):
         # executed.subjects, so `python real.py` and `python evil.py` differ.
         # Finding #4: the child's exit is a structured integer, not free text.
         fix = self.cli_fixture()
-        self.run_it("--rung", "3", "--surface", "cli", "--tier", "medium",
+        self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                     "--", sys.executable, str(fix))
         ex = self.bundle()["claims"][0]["surface"]["executed"]
         subs = ex["subjects"]
@@ -540,33 +551,38 @@ class RunConformance(unittest.TestCase):
         self.assertEqual(sub["sha256_status"], "ok")
         self.assertEqual(ex["exit"], 2)  # cli_fixture exits 2
 
-    def test_high_tier_blocks_author_rung3(self):
-        # Self-report trap holds through the wrapper: a rung-3 author claim at
-        # high tier needs rung 4 AND cross-lab; the runner can't mint either.
+    def test_high_tier_blocks_author(self):
+        # Self-report trap holds through the wrapper: an author rung-1 claim at
+        # high tier needs an independent + cross-model review; the runner can mint
+        # neither, so it blocks.
         fix = self.cli_fixture()
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "high",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "high",
                         "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
 
     # -- policy is loaded and hash-pinned BEFORE the probe runs ------
     def permissive_policy(self) -> Path:
-        # Passes a rung-3 cli claim: min_rung[low]=1 so the declared rung clears.
+        # Passes a rung-1 cli claim: observed everywhere, author unconstrained
+        # (require_context empty), so an author self-run clears any tier.
         return self.fixture("pol.json", json.dumps({
-            "version": 1, "min_rung": {"low": 1, "medium": 3, "high": 4, "critical": 4},
+            "version": 2, "min_rung": {"low": 1, "medium": 1, "high": 1, "critical": 1},
             "require_context": {}, "no_skip_tiers": [], "allow_dismiss_gaps": False}))
 
     def strict_policy(self) -> Path:
-        # Blocks the same claim: min_rung[low]=4 so rung 3 is under the floor.
+        # Blocks the same author claim: every tier demands an independent context,
+        # which an author self-run cannot supply.
         return self.fixture("strict.json", json.dumps({
-            "version": 1, "min_rung": {"low": 4, "medium": 4, "high": 4, "critical": 4},
-            "require_context": {}, "no_skip_tiers": [], "allow_dismiss_gaps": False}))
+            "version": 2, "min_rung": {"low": 1, "medium": 1, "high": 1, "critical": 1},
+            "require_context": {"low": "independent", "medium": "independent",
+                                "high": "independent", "critical": "independent"},
+            "no_skip_tiers": [], "allow_dismiss_gaps": False}))
 
     def test_policy_pinned_into_bundle(self):
         # The exact policy bytes in force at launch are stamped into the
         # bundle so a verdict is attributable to them.
         fix = self.cli_fixture()
         pol = self.permissive_policy()
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "low",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--policy", str(pol), "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         pin = self.bundle()["policy_pin"]
@@ -581,7 +597,7 @@ class RunConformance(unittest.TestCase):
         # blocked rather than silently honored.
         pol = self.strict_policy()
         permissive = json.dumps({
-            "version": 1, "min_rung": {"low": 1, "medium": 1, "high": 1, "critical": 1},
+            "version": 2, "min_rung": {"low": 1, "medium": 1, "high": 1, "critical": 1},
             "require_context": {}, "no_skip_tiers": [], "allow_dismiss_gaps": True})
         # The probe rewrites the policy file, then emits a byte (so it is a
         # completed, non-empty run), then exits 0.
@@ -589,7 +605,7 @@ class RunConformance(unittest.TestCase):
                                 f"import pathlib, sys\n"
                                 f"pathlib.Path({str(pol)!r}).write_text({permissive!r})\n"
                                 f"sys.stdout.write('done\\n')\n")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "low",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--policy", str(pol), "--", sys.executable, str(attacker))
         # Blocked either by the strict floor (pinned dict) or the tamper check;
         # in no case does the swapped-in permissive policy grant a pass.
@@ -604,7 +620,7 @@ class RunConformance(unittest.TestCase):
                            f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n"
                            f"print('hi')\n")
         bad = self.fixture("bad.json", "{ not valid json ]")
-        r = self.run_it("--rung", "3", "--surface", "cli", "--tier", "low",
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
                         "--policy", str(bad), "--", sys.executable, str(fix))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(marker.exists(), "probe must not run when the policy is unloadable")
@@ -625,7 +641,7 @@ class RunConformance(unittest.TestCase):
                             "sys.stdout.flush()\n")
         env = _env_with_src({"RUNG_MAX_CAPTURE_BYTES": "8192"})
         r = subprocess.run(
-            RUN_ARGV + ["--rung", "3", "--surface", "cli", "--tier", "low",
+            RUN_ARGV + ["--rung", "1", "--surface", "cli", "--tier", "low",
              "--policy", str(self.permissive_policy()),
              "--until-idle", "0.3", "--timeout", "10", "--", sys.executable, str(flood)],
             cwd=self.tmp, capture_output=True, text=True, env=env)
@@ -635,7 +651,7 @@ class RunConformance(unittest.TestCase):
                             for g in gaps), gaps)
         # The captured stdout artifact is bounded at (roughly) the cap.
         stdout_art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_bytes()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_bytes()
         self.assertLessEqual(len(captured), 8192)
         # Undismissed blocker under a non-dismissing policy -> gate blocks.
         self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
@@ -648,13 +664,13 @@ class RunConformance(unittest.TestCase):
                             "import os\nprint('SECRET=' + os.environ.get('MY_SECRET','<absent>'))\n")
         env = _env_with_src({"MY_SECRET": "topsecret-token"})
         r = subprocess.run(
-            RUN_ARGV + ["--rung", "3", "--surface", "cli", "--tier", "low",
+            RUN_ARGV + ["--rung", "1", "--surface", "cli", "--tier", "low",
              "--policy", str(self.permissive_policy()), "--env-clear",
              "--", sys.executable, str(leak)],
             cwd=self.tmp, capture_output=True, text=True, env=env)
         stdout_art = next(a for a in self.bundle()["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_text()
         self.assertIn("SECRET=<absent>", captured)
         self.assertNotIn("topsecret-token", captured)
 
@@ -666,14 +682,177 @@ class RunConformance(unittest.TestCase):
                             "import os\nprint('SECRET=' + os.environ.get('MY_SECRET','<absent>'))\n")
         env = _env_with_src({"MY_SECRET": "topsecret-token"})
         subprocess.run(
-            RUN_ARGV + ["--rung", "3", "--surface", "cli", "--tier", "low",
+            RUN_ARGV + ["--rung", "1", "--surface", "cli", "--tier", "low",
              "--policy", str(self.permissive_policy()),
              "--", sys.executable, str(leak)],
             cwd=self.tmp, capture_output=True, text=True, env=env)
         stdout_art = next(a for a in self.bundle()["claims"][0]["artifacts"]
                           if a["role"] == "stdout_capture")
-        captured = (self.tmp / "rung-out" / stdout_art["uri"]).read_text()
+        captured = (self.tmp / ".rung" / "output" / stdout_art["uri"]).read_text()
         self.assertIn("topsecret-token", captured)
+
+    # -- opt-in secret scan / redaction (--scan-secrets / --redact) -----
+    # AWS's own documented example access-key id: matches the pattern, is not a
+    # real credential, and is safe to embed in a public test.
+    FAKE_AWS = "AKIAIOSFODNN7EXAMPLE"
+
+    def _secret_probe(self) -> list:
+        # Clean stdout, a secret on STDERR (the dogfood leaked a token to stderr).
+        return self._pyc(
+            f"import sys; print('result ok'); print('token={self.FAKE_AWS}', file=sys.stderr)")
+
+    def test_scan_secrets_blocks_on_leak(self):
+        # --scan-secrets: an otherwise-passing rung-1 low claim blocks purely
+        # because a capture contains a secret. The scan does NOT mutate (the
+        # secret stays in the artifact), and the secret value never appears in a
+        # gap desc, the verdict, or a diagnostic.
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low", "--scan-secrets",
+                        "--", *self._secret_probe())
+        self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertTrue(any(g["id"].startswith("secret-in-") and g["severity"] == "blocker"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+        self.assertNotIn(self.FAKE_AWS, json.dumps(b.get("gaps", [])))
+        self.assertNotIn(self.FAKE_AWS, r.stdout + r.stderr)
+        # scan does not redact: the raw secret is still in the written artifact.
+        err_art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == "stderr_capture")
+        captured = (self.tmp / ".rung" / "output" / err_art["uri"]).read_bytes()
+        self.assertIn(self.FAKE_AWS.encode(), captured)
+
+    def test_redact_masks_and_passes(self):
+        # --redact: the secret is masked in the WRITTEN artifact (so its recorded
+        # sha256 is of the redacted bytes), disclosed as an advisory gap that does
+        # not block a claim that otherwise passes.
+        import hashlib
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low", "--redact",
+                        "--", *self._secret_probe())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertTrue(any(g["id"].startswith("redacted-") and g["severity"] == "advisory"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+        err_art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == "stderr_capture")
+        captured = (self.tmp / ".rung" / "output" / err_art["uri"]).read_bytes()
+        self.assertNotIn(self.FAKE_AWS.encode(), captured)
+        self.assertIn(b"[REDACTED:", captured)
+        # The gate re-verified the artifact, so the recorded hash IS of the
+        # redacted bytes on disk (self-consistent, not the raw capture's hash).
+        self.assertEqual(err_art["sha256"], hashlib.sha256(captured).hexdigest())
+
+    def test_default_no_scan_keeps_exact_bytes(self):
+        # Neither flag: the exact-bytes default is unchanged -- the secret is
+        # written verbatim and no secret gap is recorded.
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
+                        "--", *self._secret_probe())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertFalse(any(g["id"].startswith(("secret-in-", "redacted-"))
+                             for g in b.get("gaps", [])), b.get("gaps"))
+        err_art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == "stderr_capture")
+        captured = (self.tmp / ".rung" / "output" / err_art["uri"]).read_bytes()
+        self.assertIn(self.FAKE_AWS.encode(), captured)
+
+    def test_redact_and_scan_leaves_no_residual_blocker(self):
+        # --redact --scan-secrets: redaction runs first, then the scan verifies no
+        # residue. The secret is gone, so only the advisory (redaction) gap
+        # remains and the claim passes.
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
+                        "--redact", "--scan-secrets", "--", *self._secret_probe())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        ids = [g["id"] for g in self.bundle().get("gaps", [])]
+        self.assertTrue(any(i.startswith("redacted-") for i in ids), ids)
+        self.assertFalse(any(i.startswith("secret-in-") for i in ids), ids)
+
+    def test_diff_redact_masks_both_captures_and_keeps_delta(self):
+        # --diff --redact: both captures are masked, and a real (non-secret) delta
+        # survives -- S0 prints A, S1 prints B, so the change claim still passes.
+        s0 = self._pyc(f"print('A'); print('{self.FAKE_AWS}')")
+        s1 = self._pyc(f"print('B'); print('{self.FAKE_AWS}')")
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
+                        "--redact", "--", *s0, ":::", *s1)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        b = self.bundle()
+        for role in ("s0_capture", "s1_capture"):
+            art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == role)
+            cap = (self.tmp / ".rung" / "output" / art["uri"]).read_bytes()
+            self.assertNotIn(self.FAKE_AWS.encode(), cap)
+            self.assertIn(b"[REDACTED:", cap)
+
+    def test_diff_redact_collapse_of_real_delta_blocks(self):
+        # The redaction-altered-differential guard's FIRING case: two runs that
+        # differ ONLY in a secret-shaped token. Raw S0/S1 bytes differ (a real
+        # change), but --redact rewrites both to the same [REDACTED:...] placeholder,
+        # collapsing them to byte-identical captures. Left unguarded, that would
+        # publish a false "invariance" (or defeat an --expect-delta change). The
+        # guard compares raw-vs-redacted equality and forces a block.
+        s0 = self._pyc("print('AKIAIOSFODNN7EXAMPL1')")
+        s1 = self._pyc("print('AKIAIOSFODNN7EXAMPL2')")
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
+                        "--redact", "--", *s0, ":::", *s1)
+        self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertTrue(any(g["id"] == "redaction-altered-differential"
+                            and g["severity"] == "blocker"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+
+    def test_redact_does_not_mask_nondeterminism(self):
+        # Design guard: redaction is a publishing transform, not a determinism
+        # fix. The determinism check runs on the RAW compared bytes, so a
+        # nondeterministic side still trips nondeterministic-output even with
+        # --redact (it does not paper over a real nondeterminism defect).
+        noisy = self._pyc("import time; print(time.time_ns())")
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
+                        "--redact", "--", *noisy, ":::", *noisy)
+        self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
+        self.assertTrue(any(g["id"] == "nondeterministic-output"
+                            for g in self.bundle().get("gaps", [])))
+
+    def test_scan_secrets_blocks_secret_in_argv(self):
+        # Regression (STRIDE finding): a secret passed ON THE COMMAND LINE, not in
+        # any capture, still lands in the bundle's echoed invocation fields
+        # (change.s1, the claim, how_established). --scan-secrets must block it too,
+        # not just capture leaks. The probe prints 'ok' and never echoes the token,
+        # so the ONLY place the secret can appear is the argv metadata.
+        probe = self._pyc("print('ok')") + [self.FAKE_AWS]
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low", "--scan-secrets",
+                        "--", *probe)
+        self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertTrue(any(g["id"] == "secret-in-invocation" and g["severity"] == "blocker"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+        # the capture is clean -- this is purely the argv-leak path, not the capture one
+        out_art = next(a for a in b["claims"][0]["artifacts"] if a["role"] == "stdout_capture")
+        self.assertNotIn(self.FAKE_AWS.encode(), (self.tmp / ".rung" / "output" / out_art["uri"]).read_bytes())
+        # and the secret value never leaks into a gap desc, the verdict, or stderr
+        self.assertNotIn(self.FAKE_AWS, json.dumps(b.get("gaps", [])))
+        self.assertNotIn(self.FAKE_AWS, r.stdout + r.stderr)
+
+    def test_redact_masks_secret_in_argv(self):
+        # --redact must mask a command-line secret out of EVERY echoed field, so the
+        # value appears nowhere in the written bundle and the claim still passes.
+        probe = self._pyc("print('ok')") + [self.FAKE_AWS]
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low", "--redact",
+                        "--", *probe)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertNotIn(self.FAKE_AWS, json.dumps(b))
+        self.assertIn("[REDACTED:", b["change"]["s1"])
+        self.assertTrue(any(g["id"] == "redacted-invocation" and g["severity"] == "advisory"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+
+    def test_diff_scan_secrets_blocks_secret_in_side_argv(self):
+        # The diff path echoes each side's argv into differential.sN.argv and the
+        # change.sN free text; a secret in one side's command line must block under
+        # --scan-secrets. S0 prints A, S1 prints B (a real delta), and the secret
+        # rides only on S1's argv (never printed).
+        s0 = self._pyc("print('A')")
+        s1 = self._pyc("print('B')") + [self.FAKE_AWS]
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
+                        "--scan-secrets", "--", *s0, ":::", *s1)
+        self.assertEqual(r.returncode, 30, r.stdout + r.stderr)
+        b = self.bundle()
+        self.assertTrue(any(g["id"] == "secret-in-s1-invocation" and g["severity"] == "blocker"
+                            for g in b.get("gaps", [])), b.get("gaps"))
+        self.assertNotIn(self.FAKE_AWS, json.dumps(b.get("gaps", [])))
 
     def test_bad_capture_cap_env_fails_closed(self):
         # A malformed RUNG_MAX_CAPTURE_BYTES must fail closed to exit 2 with a

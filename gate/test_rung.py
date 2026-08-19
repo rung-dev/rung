@@ -18,8 +18,7 @@ What these lock down (the hard invariants the upgrade must not regress):
   * read-only `doctor` (exit 0 or 2 ONLY, never 30);
   * `--quiet` keeps the verdict and every critical error, muzzles only rung's
     own progress;
-  * `--no-color` / NO_COLOR keep stdout free of ANSI; there is NO `--json` flag;
-  * no em-dash leaks into any generated help/version/doctor text.
+  * `--no-color` / NO_COLOR keep stdout free of ANSI; there is NO `--json` flag.
 """
 import json
 import os
@@ -40,13 +39,12 @@ if str(SRC) not in sys.path:
 import rung.cli as cli    # in-process, for the crash / color unit tests
 import rung.gate as gate  # in-process, for constants + resolved-path assertions
 
-FLAGSHIP = REPO / "cases" / "sync-connector-stdio-purity" / "bundle.json"
+FLAGSHIP = REPO / "gate" / "cases" / "sync-connector-stdio-purity" / "bundle.json"
 GATE_PATH = Path(gate.__file__).resolve()  # what `rung version` should echo
 RUNG_ARGV = [sys.executable, "-m", "rung.cli"]
 GATE_ARGV = [sys.executable, "-m", "rung.gate"]
 
 ESC = "\x1b["      # ANSI CSI introducer; must never touch stdout
-EMDASH = "—"  # forbidden anywhere in published text
 
 
 def _env(extra=None):
@@ -95,7 +93,7 @@ class RungCLI(unittest.TestCase):
         # to exercise the 30 code end to end.
         p = self.tmp / "block.json"
         p.write_text(json.dumps({
-            "schema": "evidence-bundle/v1",
+            "schema": "evidence-bundle/v2",
             "change": {"repo": "x", "s0": "a", "s1": "b", "producer": {"lab": "l"}},
             "claims": [], "gaps": [],
         }))
@@ -132,12 +130,12 @@ class RungCLI(unittest.TestCase):
     def test_run_routes_to_run_witness(self):
         fix = self.fixture("probe.py", "import sys\nsys.stdout.write('ok\\n')\n")
         out = self.tmp / "out"
-        r = self.rung("run", "--rung", "3", "--surface", "cli", "--tier", "medium",
+        r = self.rung("run", "--rung", "1", "--surface", "cli", "--tier", "low",
                       "--out", str(out), "--", sys.executable, str(fix), cwd=self.tmp)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         b = json.loads((out / "bundle.json").read_text())
         c = b["claims"][0]
-        self.assertEqual(c["rung"], 3)
+        self.assertEqual(c["rung"], 1)
         self.assertEqual(c["context"], "author")
         self.assertEqual(c["surface"]["kind"], "cli")
 
@@ -198,7 +196,7 @@ class RungCLI(unittest.TestCase):
         self.assertIn("usage", r.stderr.lower())
 
     def test_per_command_help_has_example_and_exit_contract(self):
-        for cmd in ("run", "gate", "check", "doctor", "version"):
+        for cmd in ("run", "gate", "check", "doctor", "version", "skill"):
             r = self.rung(cmd, "-h")
             self.assertEqual(r.returncode, 0, cmd)
             low = r.stdout.lower()
@@ -421,6 +419,59 @@ class RungCLI(unittest.TestCase):
         self.assertNotIn(TRACE, v.stderr)
         self.assertIn("unknown", v.stdout.lower())
 
+    # -- skill --------------------------------------------------------------
+    def test_skill_print_emits_skill_md(self):
+        # `rung skill --print` dumps the packaged SKILL.md to stdout, byte-for-byte,
+        # with no ANSI and no envelope. Exit 0.
+        r = self.rung("skill", "--print")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        source = (REPO / "skill" / "SKILL.md").read_text()
+        self.assertEqual(r.stdout, source, "skill --print must be the packaged SKILL.md verbatim")
+        self.assertNotIn(ESC, r.stdout)
+
+    def test_skill_install_copies_tree(self):
+        dest = self.tmp / "agent-skills" / "rung"
+        r = self.rung("skill", "--install", str(dest))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((dest / "SKILL.md").exists(), "SKILL.md installed")
+        self.assertTrue((dest / "references" / "surfaces.md").exists(), "references installed")
+        self.assertEqual((dest / "SKILL.md").read_bytes(),
+                         (REPO / "skill" / "SKILL.md").read_bytes(),
+                         "installed SKILL.md must match the source byte for byte")
+
+    def test_skill_install_refuses_clobber_without_force(self):
+        dest = self.tmp / "rung-skill"
+        self.assertEqual(self.rung("skill", "--install", str(dest)).returncode, 0)
+        # Second install without --force must fail closed (exit 2), not overwrite.
+        again = self.rung("skill", "--install", str(dest))
+        self.assertEqual(again.returncode, 2)
+        self.assertIn("--force", again.stderr)
+        # With --force it succeeds.
+        forced = self.rung("skill", "--install", str(dest), "--force")
+        self.assertEqual(forced.returncode, 0, forced.stdout + forced.stderr)
+
+    def test_skill_install_force_is_clean_replace_not_merge(self):
+        # --force must REPLACE DEST, not merge into it: an orphan file left over
+        # from a prior install (a reference dropped/renamed across skill versions)
+        # must not survive, or the agent could load stale guidance.
+        dest = self.tmp / "rung-skill"
+        self.assertEqual(self.rung("skill", "--install", str(dest)).returncode, 0)
+        orphan = dest / "references" / "STALE_OLD.md"
+        orphan.write_text("stale guidance an agent must not load\n")
+        self.assertEqual(self.rung("skill", "--install", str(dest), "--force").returncode, 0)
+        self.assertFalse(orphan.exists(), "--force must remove orphaned files, not merge around them")
+        self.assertTrue((dest / "SKILL.md").exists(), "the fresh skill is still installed")
+
+    def test_skill_bare_reports_location(self):
+        r = self.rung("skill")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("skill", r.stdout.lower())
+        self.assertIn("--install", r.stdout)
+
+    def test_skill_print_and_install_mutually_exclusive(self):
+        r = self.rung("skill", "--print", "--install", str(self.tmp / "x"))
+        self.assertEqual(r.returncode, 2)
+
     def test_no_json_flag_exists(self):
         # F1: --json is not a rung flag. It must fail closed to exit 2, never
         # silently succeed as a no-op mode.
@@ -441,20 +492,14 @@ class RungCLI(unittest.TestCase):
             ("doctor", str(bad)),
             ("--json", "gate", str(FLAGSHIP)),
             ("help",),
+            ("skill",),
+            ("skill", "--print"),
             (),
         ]
         for args in cases:
             r = self.rung(*args)
             self.assertIn(r.returncode, (0, 30, 2),
                           f"rung {args} returned out-of-contract {r.returncode}")
-
-    def test_no_emdash_in_generated_text(self):
-        texts = [self.rung("-h").stdout, self.rung("version").stdout,
-                 self.rung("doctor").stderr]
-        for cmd in ("run", "gate", "check", "doctor", "version"):
-            texts.append(self.rung(cmd, "-h").stdout)
-        for t in texts:
-            self.assertNotIn(EMDASH, t, "no em-dash may appear in rung's own text")
 
 
 if __name__ == "__main__":

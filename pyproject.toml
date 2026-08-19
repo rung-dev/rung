@@ -48,20 +48,21 @@ path = "src/rung/__init__.py"
 [tool.hatch.build.targets.wheel]
 # src/ layout: the importable package is src/rung. hatchling ships all files
 # under the package directory, so data/default_policy.json (the bundled default
-# policy resolved via importlib.resources) and data/schema/ (optional reference
-# material) travel with the wheel.
+# policy resolved via importlib.resources), data/schema/ (optional reference
+# material), and data/skill/ (the packaged skill `rung skill` prints/installs)
+# all travel with the wheel.
 packages = ["src/rung"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/rung",
     "README.md",
-    "VERIFYING-RUNG.md",
+    "VERIFYING-RUNG-WITH-RUNG.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
     "LICENSE",
     "policy",
     "schema",
-    "cases",
+    "gate/cases",
     "skill",
 ]

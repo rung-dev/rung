@@ -1,0 +1,35 @@
+{
+  "verdict": "pass",
+  "exit_code": 0,
+  "computed_by": "gate/v2",
+  "gate_sha256": "4f750b77d176b855f4562427c044a0423d438ff939e8d528c198f21301590273",
+  "policy_sha256": "4e6c2637bc82627f6b1a4ab607f1df8dceb6d22239d5cac0a754e261e3ee3129",
+  "schema": "evidence-bundle/v2",
+  "resolved_policy": {
+    "min_rung": {
+      "low": 1,
+      "medium": 1,
+      "high": 1,
+      "critical": 1
+    },
+    "require_context": {
+      "medium": "independent",
+      "high": "independent",
+      "critical": "independent"
+    },
+    "require_cross_model": [
+      "high",
+      "critical"
+    ],
+    "require_cross_lab": [
+      "critical"
+    ],
+    "require_method": null,
+    "no_skip_tiers": [
+      "high",
+      "critical"
+    ],
+    "allow_dismiss_gaps": false
+  },
+  "reasons": []
+}

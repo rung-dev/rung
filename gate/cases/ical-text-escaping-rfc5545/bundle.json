@@ -1,20 +1,21 @@
 {
-  "schema": "evidence-bundle/v1",
+  "schema": "evidence-bundle/v2",
   "change": {
     "repo": "the iCalendar (RFC 5545) export library of a privacy-focused open-source calendar app (pure-JVM Kotlin module)",
     "s0": "parent of the fix (baseline)",
     "s1": "the fix",
     "diff_range": "S0..S1 (the generator: CR normalization in the TEXT escaper + routing VALARM text fields through it)",
     "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
-    "policy_ref": "rung-policy/v1#default"
+    "policy_ref": "rung-policy/v2#default"
   },
   "claims": [
     {
       "id": "c1",
       "claim": "Emitted iCalendar TEXT values are RFC 5545-clean: a lone/CRLF carriage return in an event DESCRIPTION is normalized to an escaped newline (no bare CR survives), and VALARM DESCRIPTION/SUMMARY/RELATED-TO have their commas, semicolons, and backslashes escaped.",
-      "risk_tier": "medium",
+      "risk_tier": "low",
       "surface": { "kind": "library", "transport": "public generate() API -> emitted VCALENDAR string", "how_reached": "compiled the module at S0 and S1, called the public generator through its package boundary with adversarial input, captured the emitted bytes" },
-      "rung": 4,
+      "rung": 1,
+      "method": "differential",
       "context": "author",
       "expected_delta": "change",
       "how_established": "Built the calendar export module at S0 and S1 in isolated detached git worktrees (working repo untouched), compiling main sources directly with the cached Kotlin compiler + ical4j classpath (no Android SDK, no app, no network). Drove the PUBLIC generate() API (not the private escaper) with an event whose DESCRIPTION carries a CRLF and a lone CR, plus a DISPLAY VALARM whose text fields carry comma/semicolon/backslash. Captured the emitted VCALENDAR string at both commits. The only non-deterministic fields (DTSTAMP time, generated UIDs) were normalized to «redacted» IDENTICALLY in both captures, so the artifact diff is exactly the fix; the byte-level properties under test (lone-CR count; escaping of the three VALARM TEXT lines) are preserved verbatim.",

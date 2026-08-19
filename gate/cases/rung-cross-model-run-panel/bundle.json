@@ -1,0 +1,87 @@
+{
+  "schema": "evidence-bundle/v2",
+  "change": {
+    "repo": "rung itself: the gate's verdict on a fixed input bundle, re-run by an independent cross-model panel",
+    "s0": "an independent reviewer's gate run under PYTHONHASHSEED=0",
+    "s1": "the same reviewer's gate run under a different PYTHONHASHSEED",
+    "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "rung-dev" },
+    "created_at": "2026-08-19",
+    "policy_ref": "rung-policy/v2#default"
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "rung's gate verdict is deterministic across Python hash seeds, and that invariance was reproduced independently by a blind cross-model panel. Each reviewer ran on a model other than the producer's and DROVE rung's real gate surface itself with its own `rung run` (following rung's packaged skill), rather than re-deriving the verdict from the producer's captured bytes.",
+      "risk_tier": "high",
+      "surface": {
+        "kind": "cli",
+        "how_reached": "direct-exec of `rung gate <determinism bundle>` under two PYTHONHASHSEED values, compared byte-for-byte; each panel member constructed and ran this differential itself from the skill's guidance"
+      },
+      "rung": 1,
+      "method": "differential",
+      "expected_delta": "invariance",
+      "context": "independent",
+      "how_established": "A blind two-model panel each followed `rung skill --print` and, given only the claim and its risk tier, independently built a `rung run --rung 1 --surface cli --diff --expect-delta invariance` over `rung gate gate/cases/rung-self-verdict-determinism/bundle.json` under two hash seeds, let rung produce and gate its own bundle, and reported the result. Both reached invariance with the gate exiting 0. The committed artifacts below are the gate's stdout verdict bytes the panel observed; they carry only content-derived hashes and the resolved policy (no filesystem paths), so they re-gate identically on any machine.",
+      "artifacts": [
+        {
+          "id": "a_s0",
+          "role": "s0_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s0.stdout",
+          "sha256": "96cd3f2b98014d527b1b17849e1db6063fc2a583ad2d6060db7c56656a46cddc",
+          "summary": "gate stdout verdict on the determinism bundle under one hash seed: verdict=pass, gate_sha256 and policy_sha256 pinned, reasons=[]"
+        },
+        {
+          "id": "a_s1",
+          "role": "s1_capture",
+          "media": "text/stdout",
+          "uri": "artifacts/s1.stdout",
+          "sha256": "96cd3f2b98014d527b1b17849e1db6063fc2a583ad2d6060db7c56656a46cddc",
+          "summary": "gate stdout verdict under a different hash seed: byte-identical to s0"
+        }
+      ],
+      "differential": {
+        "probe": "env PYTHONHASHSEED=<n> rung gate gate/cases/rung-self-verdict-determinism/bundle.json   # compare stdout across n",
+        "channel": "stdout",
+        "expected_delta": "invariance",
+        "s0_observed": "96cd3f2b98014d527b1b17849e1db6063fc2a583ad2d6060db7c56656a46cddc",
+        "s1_observed": "96cd3f2b98014d527b1b17849e1db6063fc2a583ad2d6060db7c56656a46cddc",
+        "observed_delta": "none: the compared stdout is byte-for-byte equal (identical sha256), so the claimed invariance holds",
+        "note": "s0_observed / s1_observed are the sha256 of each side's captured stdout; the gate decides the polarity from the verified capture artifacts, this block is the human-readable record."
+      },
+      "verdict": "pass",
+      "attestation": {
+        "judge_id": "blind-cross-model-run-panel",
+        "verdict": "pass",
+        "lab": "rung-dev",
+        "panel": [
+          {
+            "model": "claude-sonnet-4-5-20250929",
+            "verdict": "pass",
+            "note": "Followed rung's skill; independently constructed a differential invariance `rung run` of the gate under PYTHONHASHSEED 0 vs 42. Byte-identical stdout, gate exit 0."
+          },
+          {
+            "model": "claude-haiku-4-5-20251001",
+            "verdict": "pass",
+            "note": "Followed rung's skill; independently constructed a differential invariance `rung run` of the gate under PYTHONHASHSEED 0 vs 1. Byte-identical output, gate exit 0."
+          }
+        ],
+        "note": "Blind: each reviewer was given only the claim text, the risk tier, and rung's own skill, never the producer's reasoning or verdict. Each ran on a model differing from the producer's (claude-opus-4-8) and each drove the real surface itself. The gate checks this panel for presence (context independent, >=1 reviewer model != producer, each verdict pass); that the reviewers were blind and that the two models fail independently are judge-only concerns."
+      }
+    }
+  ],
+  "gaps": [
+    {
+      "id": "g1",
+      "severity": "advisory",
+      "desc": "The panel supplies a cross-model qualifier, not cross-lab: both reviewers are models driven by the same operator (lab rung-dev), so this case reaches high, not critical.",
+      "why_unverified": "cross-lab independence requires a reviewer at a different organization, which one operator cannot mint; critical stays reserved for a second lab."
+    },
+    {
+      "id": "g2",
+      "severity": "advisory",
+      "desc": "Two hash seeds were exercised per reviewer, not the full space of interpreter and platform variation.",
+      "why_unverified": "hash-seed is the cheap, load-bearing source of dict/set-ordering nondeterminism in this gate; broader interpreter/OS variation is a separate, larger sweep."
+    }
+  ]
+}

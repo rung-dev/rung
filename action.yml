@@ -2,7 +2,7 @@
 # evidence bundle; the job fails on anything that is not exit 0 (both 30 block and
 # 2 cannot-evaluate fail the build), matching rung's exit-code contract.
 name: rung gate
-description: Gate a rung evidence-bundle/v1 in CI; fails the build unless the gate passes (exit 0).
+description: Gate a rung evidence-bundle/v2 in CI; fails the build unless the gate passes (exit 0).
 author: rung-dev
 branding:
   icon: check-circle
@@ -10,7 +10,7 @@ branding:
 
 inputs:
   bundle:
-    description: Path to the evidence-bundle/v1 JSON file to gate.
+    description: Path to the evidence-bundle/v2 JSON file to gate.
     required: true
   policy:
     description: Path to a policy JSON file. Leave empty to use rung's bundled default policy.
@@ -21,7 +21,7 @@ inputs:
       Version of rung-ai to install from PyPI. Pin this to a release you trust;
       the default tracks the action's own tag.
     required: false
-    default: "0.2.0"
+    default: "0.5.1"
 
 runs:
   using: composite

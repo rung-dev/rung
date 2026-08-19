@@ -1,7 +1,9 @@
 {
-  "version": 1,
-  "require_context": { "high": "cross-lab", "critical": "cross-lab" },
+  "version": 2,
+  "min_rung": { "low": 1, "medium": 1, "high": 1, "critical": 1 },
+  "require_context": { "medium": "independent", "high": "independent", "critical": "independent" },
+  "require_cross_model": ["high", "critical"],
+  "require_cross_lab": ["critical"],
   "no_skip_tiers": ["high", "critical"],
-  "allow_dismiss_gaps": false,
-  "min_rung": { "low": 2, "medium": 3, "high": 4, "critical": 4 }
+  "allow_dismiss_gaps": false
 }

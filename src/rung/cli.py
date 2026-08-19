@@ -8,6 +8,7 @@ robustness while staying stdlib-only, deterministic, and dependency-free:
     rung check  [global] BUNDLE [POLICY]   alias for gate
     rung doctor [global] [BUNDLE]          read-only preflight; exit 0/2 only
     rung version                           schema major + gate sha256 + resolved paths
+    rung skill  [global] [--print|--install DEST]  surface the packaged skill (harness-neutral)
     rung help / -h / --help                top-level usage
 
 Global flags (a shared parent parser): --quiet/-q, --no-color. There is NO
@@ -35,15 +36,17 @@ Each tool still runs standalone as a module (`python -m rung.gate`,
 import argparse
 import difflib
 import hashlib
+import importlib.resources
 import os
 import pathlib
 import platform
+import shutil
 import sys
 
 # Every command word rung recognizes; the difflib pool for "did you mean" is the
 # runnable subset (suggesting `help` on a typo is unhelpful).
-COMMANDS = ("run", "gate", "check", "doctor", "version", "help")
-_SUGGESTABLE = ("run", "gate", "check", "doctor", "version")
+COMMANDS = ("run", "gate", "check", "doctor", "version", "skill", "help")
+_SUGGESTABLE = ("run", "gate", "check", "doctor", "version", "skill")
 
 
 def _import_gate():
@@ -122,7 +125,7 @@ def _build_parser():
         epilog=(
             "Examples:\n"
             "  rung gate bundle.json                 gate an authored bundle\n"
-            "  rung run --rung 3 --surface cli -- mytool --check\n"
+            "  rung run --rung 1 --surface cli -- mytool --check\n"
             "  rung doctor bundle.json               read-only preflight\n\n"
             + _EXIT_LINE),
     )
@@ -135,11 +138,12 @@ def _build_parser():
         description="Witness one execution (or an S0/S1 differential) and gate the emitted bundle.",
         epilog=(
             "Examples:\n"
-            "  rung run --rung 3 --surface cli -- mytool --check\n"
-            "  rung run --rung 4 --diff --surface cli -- baseline ::: changed\n\n"
+            "  rung run --rung 1 --surface cli -- mytool --check\n"
+            "  rung run --rung 1 --diff --surface cli -- baseline ::: changed\n\n"
             "All args after the command are passed through to rung.run verbatim,\n"
-            "including everything after `--` (the probe argv). Run `rung run -- ...`\n"
-            "or see `rung run -h` for the full witness surface.\n\n"
+            "including everything after `--` (the probe argv). This dispatcher\n"
+            "forwards them, so the full witness surface (--rung, --method,\n"
+            "--surface, --diff, ...) is listed by `python -m rung.run -h`.\n\n"
             + _EXIT_LINE))
 
     for name, blurb in (("gate", "gate an already-authored bundle"),
@@ -176,6 +180,29 @@ def _build_parser():
         description="Print the schema major this rung speaks, the pinned gate's sha256, and the "
                     "resolved paths of the running rung and gate.py.",
         epilog="Example:\n  rung version\n\n" + _EXIT_LINE)
+
+    sk = sub.add_parser(
+        "skill", parents=[parent], add_help=True, allow_abbrev=False,
+        help="print or install the bundled rung skill (harness-neutral)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Surface the packaged rung skill (SKILL.md + references). The skill is plain "
+                    "markdown and assumes no particular agent harness: print it into any agent's "
+                    "context, or copy it into whatever directory your harness discovers skills in.",
+        epilog=(
+            "Examples:\n"
+            "  rung skill                            print where the packaged skill lives\n"
+            "  rung skill --print                    write SKILL.md to stdout (pipe into any agent)\n"
+            "  rung skill --install .claude/skills/rung   copy the skill into a dir you name\n\n"
+            "--install takes a destination directory YOU choose; rung bakes in no harness\n"
+            "convention. For Claude Code that is usually .claude/skills/rung.\n\n"
+            + _EXIT_LINE))
+    skg = sk.add_mutually_exclusive_group()
+    skg.add_argument("--print", dest="print_skill", action="store_true",
+                     help="write SKILL.md to stdout")
+    skg.add_argument("--install", metavar="DEST", default=None,
+                     help="copy the skill tree into DEST (a directory you name)")
+    sk.add_argument("--force", action="store_true",
+                    help="with --install, replace DEST if it already exists (removes its current contents first)")
 
     sub.add_parser(
         "help", parents=[parent], add_help=True, allow_abbrev=False, help="show top-level usage",
@@ -284,6 +311,86 @@ def _doctor(bundle, quiet, color):
     return EXIT_PASS
 
 
+# --- skill ------------------------------------------------------------------
+
+def _skill_resource():
+    """The packaged skill tree, resolved as an importlib.resources Traversable so
+    it works identically from a checkout and from an installed (even zipped)
+    wheel. May raise on a broken/absent package; callers translate to exit 2."""
+    return importlib.resources.files(__package__ or "rung") / "data" / "skill"
+
+
+def _copy_traversable(src, dest):
+    """Recursively copy an importlib.resources Traversable tree to a filesystem
+    dir, byte-for-byte. Uses only the Traversable API (iterdir/is_dir/read_bytes),
+    so it needs no as_file() directory materialization (unsupported < 3.12)."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for child in src.iterdir():
+        target = dest / child.name
+        if child.is_dir():
+            _copy_traversable(child, target)
+        else:
+            target.write_bytes(child.read_bytes())
+
+
+def _skill(print_skill, install_dest, force, color):
+    """Surface the packaged skill. Harness-neutral: print its location, dump
+    SKILL.md, or copy the tree into a directory the caller names. Exit 0/2 only,
+    never 30 (nothing here is a gate verdict)."""
+    try:
+        res = _skill_resource()
+    except Exception as e:  # noqa: BLE001 - a broken package must fail closed, not crash
+        _error("cannot locate the bundled skill: " + str(e),
+               hint="reinstall rung-ai, or run `rung doctor`.", color=color)
+        return EXIT_USAGE
+
+    if print_skill:
+        try:
+            sys.stdout.write((res / "SKILL.md").read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            _error("cannot read the bundled SKILL.md: " + str(e), color=color)
+            return EXIT_USAGE
+        return EXIT_PASS
+
+    if install_dest is not None:
+        dest = pathlib.Path(install_dest)
+        if dest.exists() and not force:
+            _error("refusing to overwrite existing " + str(dest),
+                   hint="pass --force to replace it, or name a different directory.",
+                   example="rung skill --install " + install_dest + " --force", color=color)
+            return EXIT_USAGE
+        try:
+            # --force is a clean replace, not a merge: remove exactly what was
+            # named first, so a reference file dropped/renamed across skill
+            # versions cannot survive as an orphan the agent still loads. Only
+            # the named path is touched (a symlink is unlinked, not followed).
+            if dest.exists():
+                if dest.is_dir() and not dest.is_symlink():
+                    shutil.rmtree(dest)
+                else:
+                    dest.unlink()
+            _copy_traversable(res, dest)
+        except Exception as e:  # noqa: BLE001 - any I/O failure fails closed to 2
+            _error("could not install the skill to " + str(dest) + ": " + str(e), color=color)
+            return EXIT_USAGE
+        sys.stderr.write("installed rung skill to " + str(dest) + "\n")
+        return EXIT_PASS
+
+    # No sub-flag: report where the packaged skill lives + how to use it. as_file
+    # on the single SKILL.md file works on every version; its parent is the tree.
+    try:
+        with importlib.resources.as_file(res / "SKILL.md") as p:
+            loc = str(pathlib.Path(p).parent)
+    except Exception:  # noqa: BLE001 - display best-effort; never fail the command
+        loc = "unknown"
+    sys.stdout.write(
+        "packaged rung skill: " + loc + "\n"
+        "  rung skill --print                 write SKILL.md to stdout (read it into any agent)\n"
+        "  rung skill --install <dir>         copy the skill into a directory you name\n"
+        "                                     (Claude Code: .claude/skills/rung)\n")
+    return EXIT_PASS
+
+
 # --- dispatch ---------------------------------------------------------------
 
 def main(argv=None):
@@ -369,6 +476,12 @@ def main(argv=None):
         if _reject_extras("doctor", extras, color):
             return EXIT_USAGE
         return _doctor(args.bundle, quiet, color)
+
+    if args.command == "skill":
+        if _reject_extras("skill", extras, color):
+            return EXIT_USAGE
+        return _skill(getattr(args, "print_skill", False), getattr(args, "install", None),
+                      getattr(args, "force", False), color)
 
     # Unreachable: every command in COMMANDS is handled above.
     parser.print_help(sys.stderr)

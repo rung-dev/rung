@@ -28,7 +28,7 @@ jobs:
           PYTHONPATH: src
         run: |
           set -euo pipefail
-          for b in cases/*/bundle.json; do
+          for b in gate/cases/*/bundle.json; do
             echo "::group::$b"
             python -m rung.gate "$b"
             echo "::endgroup::"
@@ -39,19 +39,38 @@ jobs:
           PYTHONPATH: src
         run: |
           set -euo pipefail
-          for b in cases/*/bundle.json; do
+          for b in gate/cases/*/bundle.json; do
+            # The cross-model run panel legitimately clears high (independent +
+            # cross-model); it is asserted on its own below. Every OTHER case is an
+            # author self-run and must block at high.
+            case "$b" in */rung-cross-model-run-panel/*) continue ;; esac
             if python -m rung.gate "$b" --tier high; then
-              echo "FAIL: $b passed at high tier without a cross-lab attestation"
+              echo "FAIL: $b passed at high tier without an independent cross-model attestation"
               exit 1
             fi
           done
-          echo "OK: all cases block at high tier (self-report trap holds)"
+          echo "OK: all author cases block at high tier (self-report trap holds)"
+
+      - name: Independent cross-model panel clears high, blocks critical
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          b=gate/cases/rung-cross-model-run-panel/bundle.json
+          # The bottom-right cell: independent context + a cross-model attestation
+          # clears high; the same panel is not cross-lab, so critical blocks.
+          python -m rung.gate "$b" --tier high
+          if python -m rung.gate "$b" --tier critical; then
+            echo "FAIL: $b passed at critical without a cross-lab attestation"
+            exit 1
+          fi
+          echo "OK: cross-model run panel clears high and blocks critical"
 
       - name: Validate the bundle schema is well-formed JSON Schema
         run: |
           python - <<'PY'
           import json, pathlib
-          s = json.loads(pathlib.Path("schema/evidence-bundle-v1.schema.json").read_text())
+          s = json.loads(pathlib.Path("schema/evidence-bundle-v2.schema.json").read_text())
           assert s.get("$schema", "").endswith("2020-12/schema"), "unexpected $schema"
           print("schema parses; $id:", s.get("$id"))
           PY

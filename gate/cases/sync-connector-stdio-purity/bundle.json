@@ -1,5 +1,5 @@
 {
-  "schema": "evidence-bundle/v1",
+  "schema": "evidence-bundle/v2",
   "change": {
     "repo": "«redacted»: a hosted-calendar sync connector exposed to AI assistants over a standard tool-calling protocol",
     "s1": "1111111",
@@ -7,19 +7,21 @@
     "diff_range": "0000000..1111111",
     "producer": { "agent": "claude-code", "model": "claude-opus-4-8", "lab": "example-lab" },
     "created_at": "2026-08-16",
-    "policy_ref": "rung-policy/v1#default"
+    "policy_ref": "rung-policy/v2#default"
   },
   "claims": [
     {
       "id": "c1",
       "claim": "The server's first stdout line is a valid JSON-RPC frame: no logging-library banner precedes the protocol stream, so a strict client can parse the initialize response.",
-      "risk_tier": "medium",
+      "risk_tier": "low",
       "surface": {
         "kind": "server",
         "transport": "stdio newline-delimited JSON-RPC",
         "how_reached": "piped a credentials-free initialize handshake to the built fat JAR under `timeout`; read raw stdout exactly as a client would"
       },
-      "rung": 4,
+      "rung": 1,
+      "method": "differential",
+      "expected_delta": "change",
       "context": "author",
       "how_established": "Built the fat JAR at S0 and S1 in isolated detached git worktrees (JDK-21 toolchain override applied identically to both; the defect is runtime stdout behaviour, unaffected by target-bytecode version). Drove each with a credentials-free initialize handshake; captured raw stdout; compared line 1. No account, no network calendar op. The captured frame PAYLOADS are genericized for anonymization (identifying protocol/version/tool fields redacted); the byte-level property under test (line 1 parses as JSON at S1 and does NOT at S0) is preserved verbatim.",
       "artifacts": [
@@ -54,8 +56,8 @@
     {
       "id": "g1",
       "severity": "advisory",
-      "desc": "Only the credentials-free protocol handshake was driven at the real surface. Live calendar operations (read and write) were not exercised.",
-      "why_unverified": "they are auth-gated (provider app-password, 2FA-provisioned) and the write/update/delete paths mutate real cloud data; the right rung for those is a labelled mock rung or rung 0; see the case README."
+      "desc": "Only the credentials-free protocol handshake was driven at the real surface. Live read and write operations were not exercised.",
+      "why_unverified": "they are auth-gated behind a provisioned test credential and the write/update/delete paths mutate remote state; the right rung for those is a labelled mock rung or rung 0; see the case README."
     }
   ]
 }

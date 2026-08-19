@@ -4,7 +4,7 @@
 The point of this wrapper is a single inversion: an agent's cheapest path to a
 rung claim should be to ACTUALLY RUN the surface, not to hand-write a bundle. So
 `rung run` executes the probe, captures the bytes off the child's own fds, hashes
-them, and emits an `evidence-bundle/v1` with those captures as artifacts, then
+them, and emits an `evidence-bundle/v2` with those captures as artifacts, then
 runs the gate over it and exits with the GATE's verdict.
 
 What it proves vs what it takes on trust (be precise; the accuracy of this claim
@@ -14,33 +14,34 @@ is the product):
     fabrication of a capture: you can no longer paste a hash for bytes that were
     never produced.
   * DOES NOT prove WHICH program truly ran, nor that it is the subject surface.
-    `cat file`, `echo`, `printf` emit bytes too, so a fabricated capture just
+    `cat file`, `echo`, `printf` emit bytes too, so a fabricated capture
     moves to "emit the bytes via cat" -- squarely inside the surface-authenticity
     residue that is judge-only. To make that visible rather than laundered, the
     resolved path and hash of the launcher AND of every file argument (the real
     subject a `node`/`python`/`java` launcher actually ran) are recorded in
     `surface.executed`; authenticity of the surface is still not something this
     tool can decide.
-  * DOES NOT witness the RUNG. Exec-with-output cannot tell a real-surface drive
-    (rung 3) from an in-process import (rung 1) or a test runner (rung 2); they
-    all exec and emit bytes. So the tool NEVER mints a rung. `--rung` and
-    `--surface` are REQUIRED declared inputs: over-claiming is then a deliberate,
-    logged act (`--rung 3 --surface cli`), never a silent default. A bare
-    `rung run -- <cmd>` refuses to emit anything, so it can never satisfy a
-    rung-3 policy.
-  * REFUSES rung >= 3 with zero captured bytes on a process that RAN TO
+  * DOES NOT witness the RUNG. Rung in v2 is {0 not-runtime-observed, 1 observed},
+    and exec-with-output cannot tell an observation of the REAL subject surface
+    (the thing worth rung 1) from an incidental exec that merely emits bytes; they
+    all exec and emit. So the tool NEVER mints a rung. `--rung` and `--surface` are
+    REQUIRED declared inputs: over-claiming is then a deliberate, logged act
+    (`--rung 1 --surface cli`), never a silent default. A bare `rung run -- <cmd>`
+    refuses to emit anything, so it can never satisfy an observed-rung policy.
+  * REFUSES rung 1 (observed) with zero captured bytes on a process that RAN TO
     COMPLETION: observing nothing is not observation. (A process that produced
     nothing because it HUNG is diagnosed as a timeout, not as this refusal; see
-    below.) The differential runner (`--diff`) is the rung-4 increment: it drives
-    two runs (S0 baseline, S1 changed), captures each off its own fds, and emits a
-    rung-4 bundle with exactly one s0_capture and one s1_capture. The GATE, not
-    this tool, decides the delta polarity (change vs invariance) from the captured
-    bytes; the runner only declares intent (`--expect-delta`) and never asserts
-    the delta itself. Because a byte-level delta only proxies the claimed change
-    when output is deterministic, each side is run twice and a side whose compared
-    channel is not byte-stable is recorded as a blocker gap
-    (`nondeterministic-output`), never emitted as a trustworthy delta. Rung 4
-    without `--diff` is still refused (needs two runs).
+    below.) The differential runner (`--diff`) is an enforceable METHOD at rung 1,
+    not a higher rung: it drives two runs (S0 baseline, S1 changed), captures each
+    off its own fds, and emits a rung-1 `method=differential` bundle with exactly
+    one s0_capture and one s1_capture. The GATE, not this tool, decides the delta
+    polarity (change vs invariance) from the captured bytes; the runner only
+    declares intent (`--expect-delta`) and never asserts the delta itself. Because
+    a byte-level delta only proxies the claimed change when output is
+    deterministic, each side is run twice and a side whose compared channel is not
+    byte-stable is recorded as a blocker gap (`nondeterministic-output`), never
+    emitted as a trustworthy delta. `--method differential` without `--diff` is
+    refused (differential needs two runs).
 
 Non-termination is a witnessed failure, handled BEFORE the empty-output refusal
 so a silent hang is diagnosed as a hang, not as "nothing observed": on timeout
@@ -58,17 +59,42 @@ still-running child, and does NOT record a timeout. `hung-producing-nothing`
 still times out and blocks. `--expect-frames` counts newline-terminated lines, so
 it fits line-delimited protocols (JSON-RPC / MCP over stdio); for non-newline
 framing (LSP Content-Length) use `--until-idle`, which is framing-agnostic.
+Because it counts lines and not parsed protocol frames, diagnostics leaking onto
+stdout (the very defect a stdout-purity check targets) are counted too: N can be
+reached early and the recorded frame count inflated. Read that as a signal of
+stdout contamination, not a miscount.
 
 Trust posture, opposite of the gate's: the gate is safe to run on untrusted
 input (it only hashes files). `rung run` EXECUTES its probe, so running it
 against an adversarial repo is code execution. Keep it to trusted inputs; the
 sandboxed production recorder is a separate, privileged tool (not this one).
 
-Captures may contain secrets. Redaction before a bundle is committed/published is
-an operator responsibility; this tool prints a reminder and does not scan. The
-probe inherits this process's environment by default, so a token in the operator
-env can surface in a capture; `--env-clear` runs the probe with a scrubbed,
-minimal environment (PATH, HOME, locale, TERM, TMPDIR) to reduce that leakage.
+Captures may contain secrets. By default the tool writes the EXACT captured bytes
+and only prints a reminder -- the witnessed-bytes guarantee is unchanged for
+anyone who does not opt in. Two opt-in flags act on secrets, and both disclose
+that they are HEURISTIC (precision over recall: they catch obvious, high-signal
+leaks -- private-key blocks, provider key formats, keyword-anchored token/cookie/
+password assignments -- so a clean scan is NOT proof a capture is secret-free;
+hand-review before publishing is still an operator responsibility):
+  * `--redact` masks each matched span in the written artifact with a fixed,
+    category-labelled placeholder BEFORE the bytes are hashed, so the recorded
+    capture and its sha256 are of the redacted content (the artifact is no longer
+    the raw bytes; the redaction is disclosed as an advisory gap). Redaction is
+    deterministic (same input -> same output -> same hash) and the placeholder can
+    never re-match a pattern, so it is idempotent. In a `--diff`, if redaction
+    changes whether the two compared captures are equal (e.g. two runs differing
+    only in a secret-shaped token collapse to identical placeholders), a
+    `redaction-altered-differential` BLOCKER gap is recorded: the written captures
+    no longer reflect the real delta, so the differential cannot be trusted.
+  * `--scan-secrets` does not mutate: it records a BLOCKER gap for any capture
+    that still matches after redaction (so `--scan-secrets` alone blocks a live
+    secret, and `--redact --scan-secrets` blocks only if redaction left a
+    residue), so a capture with an obvious secret cannot go green under the gate.
+No gap, note, or diagnostic ever contains a secret byte -- only its category,
+count, and which capture it was in. The probe also inherits this process's
+environment by default, so a token in the operator env can surface in a capture;
+`--env-clear` runs the probe with a scrubbed, minimal environment (PATH, HOME,
+locale, TERM, TMPDIR) to reduce that leakage at the source.
 
 Policy is loaded, parsed, AND hash-pinned BEFORE the probe executes, and the
 pinned bytes are re-verified after the run: the code being judged cannot
@@ -79,7 +105,7 @@ Usage:
     rung run --rung N --surface KIND [options] -- <argv> [args...]
 """
 from __future__ import annotations
-import sys, os, json, time, signal, hashlib, pathlib, argparse, shutil, threading, subprocess, contextlib
+import sys, os, re, json, time, signal, hashlib, pathlib, argparse, shutil, threading, subprocess, contextlib
 
 try:  # package-relative under rung.*; bare fallback for a loose vendored copy
     from . import gate
@@ -145,7 +171,11 @@ def _parse(opts: list[str]) -> argparse.Namespace:
     # Witnessed dimensions are NOT declarable-by-default: the tool refuses to
     # guess a rung/surface it cannot witness.
     p.add_argument("--rung", type=int, required=True,
-                   help="0..3 for a single run; 4 requires --diff (an S0/S1 differential / two runs).")
+                   help="0 or 1. 1 = observed (drove the real surface); 0 = declared not-observed. "
+                        "--diff requires --rung 1.")
+    p.add_argument("--method", default="single", choices=gate.METHODS,
+                   help="How the observation was evaluated (default single). 'differential' requires "
+                        "--diff; 'adversarial'/'fuzz'/'property' are advisory (recorded, not gate-enforced).")
     p.add_argument("--surface", required=True, choices=SURFACES,
                    help="Declared consumer-surface class. The tool does not verify it.")
     # Declared risk/verdict inputs the gate already treats as trusted-on-assertion.
@@ -171,13 +201,14 @@ def _parse(opts: list[str]) -> argparse.Namespace:
                    help="Server mode, framing-agnostic: stop once the probe has produced "
                         "output and then gone quiet for SECS (bare flag = 2.0). "
                         "Answered-then-idle is success. Prefer this for non-newline protocols.")
-    # Differential (rung 4): two runs, one bundle. The probe argv after `--` is
-    # split on a bare `:::` into S0 (baseline) and S1 (changed). The tool captures
-    # both faithfully; the GATE decides the delta polarity from the bytes, so this
-    # tool never asserts the delta itself.
+    # Differential (method=differential, at rung 1): two runs, one bundle. The probe
+    # argv after `--` is split on a bare `:::` into S0 (baseline) and S1 (changed).
+    # The tool captures both faithfully; the GATE decides the delta polarity from the
+    # bytes, so this tool never asserts the delta itself.
     p.add_argument("--diff", action="store_true",
-                   help="Rung-4 differential mode: split the probe on `:::` into S0 ::: S1, run "
-                        "both, and emit a rung-4 bundle with one s0_capture and one s1_capture.")
+                   help="Differential method (at rung 1): split the probe on `:::` into S0 ::: S1, "
+                        "run both, and emit a rung-1 bundle with method=differential, one s0_capture "
+                        "and one s1_capture.")
     p.add_argument("--expect-delta", default="change", choices=("change", "invariance"),
                    help="Declared polarity for --diff: 'change' (S0/S1 must differ) or 'invariance' "
                         "(must match; a refactor / no-regression claim). Default change. The gate "
@@ -188,13 +219,25 @@ def _parse(opts: list[str]) -> argparse.Namespace:
                         "change confined to a channel you did not compare is not witnessed.")
     p.add_argument("--s0-cwd", default=None, help="Working directory for the S0 (baseline) run.")
     p.add_argument("--s1-cwd", default=None, help="Working directory for the S1 (changed) run.")
-    p.add_argument("--out", default="rung-out", help="Output dir for bundle.json + artifacts/ (default ./rung-out).")
+    p.add_argument("--out", default=".rung/output", help="Output dir for bundle.json + artifacts/ (default ./.rung/output).")
     p.add_argument("--policy", default=None, help="Policy JSON (default: the bundled default policy).")
     p.add_argument("--env-clear", action="store_true",
                    help="Run the probe with a scrubbed, minimal environment (PATH, HOME, locale, TERM, TMPDIR) "
                         "instead of inheriting this process's env, so operator secrets in the env "
-                        "do not leak into a capture. Redaction of the captured bytes is "
-                        "still an operator responsibility.")
+                        "do not leak into a capture. Scanning/redaction of the captured bytes is "
+                        "still opt-in (see --redact / --scan-secrets).")
+    # Opt-in secret handling. Off by default so the witnessed-bytes guarantee is
+    # unchanged for anyone who does not ask. Both are HEURISTIC (precision over
+    # recall): a clean scan is not proof, hand-review before publishing still applies.
+    p.add_argument("--redact", action="store_true",
+                   help="Mask likely secrets (private keys, provider key formats, keyword-anchored "
+                        "token/cookie/password values) in the WRITTEN captures before hashing, with a "
+                        "fixed category-labelled placeholder. Deterministic; disclosed as an advisory "
+                        "gap. Heuristic -- a clean pass is not proof, so hand-review still applies.")
+    p.add_argument("--scan-secrets", action="store_true",
+                   help="Scan the captures (after any --redact) and record a BLOCKER gap for each one "
+                        "that still matches a secret pattern, so an obvious live secret cannot pass the "
+                        "gate. Does not mutate. Heuristic -- a clean scan is not proof of a clean capture.")
     p.add_argument("--no-gate", action="store_true", help="Emit the bundle but do not run the gate.")
     return p.parse_args(opts)
 
@@ -413,9 +456,9 @@ def _resolve_exec(argv: list[str], cwd=None) -> dict:
     cli.js` and `node evil.js` would look identical. So resolve/hash argv[0] AND
     every argv element that names an existing file (the subject the launcher
     ran). A target that is not a filesystem path (e.g. `python -m pkg.mod`) has no
-    file to anchor, so `subjects` is empty there; that is the rung-2 test-runner
-    shape and is simply not covered by the provenance anchor. Authenticity of the
-    surface remains judge-only. `cwd` (the --s0-cwd/--s1-cwd the probe ran in) is
+    file to anchor, so `subjects` is empty there and that invocation is simply not
+    covered by the provenance anchor. Authenticity of the surface remains
+    judge-only. `cwd` (the --s0-cwd/--s1-cwd the probe ran in) is
     threaded through so a relative subject is hashed where it actually ran, not
     where the runner sits; without it the anchor could record a same-named decoy."""
     launcher = _resolve_one(argv[0], cwd) or {
@@ -434,6 +477,201 @@ def _resolve_exec(argv: list[str], cwd=None) -> dict:
         "sha256_status": launcher.get("sha256_status"),
         "subjects": subjects,  # the actual cli.js / .jar the launcher executed
     }
+
+
+# --- opt-in secret scanning / redaction ------------------------------------
+# Captures can carry live secrets (a real run once leaked a session/CSRF token
+# into a stderr artifact). This is off unless --scan-secrets or --redact is
+# passed, so the exact-bytes default is unchanged for anyone who does not opt in.
+#
+# Precision over recall, on purpose: these target high-signal, unambiguously
+# secret shapes. A clean scan is therefore NOT proof a capture is secret-free --
+# it is a cheap catch for the obvious leak, not a guarantee, and hand-review
+# before publishing still applies (kept true in every operator-facing message).
+# Patterns avoid nested quantifiers so a large capture cannot trigger
+# catastrophic backtracking, and run on bytes (captures are bytes). `group`
+# selects what is masked: 0 = the whole match; >0 = only that capture group, so a
+# keyword label (`Authorization:`) stays readable while its value is masked. The
+# keyword-anchored value classes EXCLUDE `[` and `]`, so a `[REDACTED:...]`
+# placeholder can never be re-matched as a value -- redaction is idempotent and
+# `--redact --scan-secrets` does not flag its own placeholders.
+SECRET_PATTERNS = (
+    ("private-key", re.compile(
+        rb"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----",
+        re.DOTALL), 0),
+    ("aws-access-key-id", re.compile(rb"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA)[A-Z0-9]{16}\b"), 0),
+    ("gcp-api-key", re.compile(rb"\bAIza[0-9A-Za-z_-]{35}\b"), 0),
+    ("github-token", re.compile(rb"\bgh[pousr]_[A-Za-z0-9]{36,251}\b"), 0),
+    ("slack-token", re.compile(rb"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), 0),
+    ("stripe-key", re.compile(rb"\b[rs]k_live_[A-Za-z0-9]{16,}\b"), 0),
+    ("openai-key", re.compile(rb"\bsk-[A-Za-z0-9]{20,}\b"), 0),
+    ("jwt", re.compile(rb"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"), 0),
+    ("http-authorization", re.compile(rb"(?i)\b(?:bearer|basic)\s+([A-Za-z0-9._~+/=-]{16,})"), 1),
+    ("url-credential", re.compile(rb"://[^/\s:@]+:([^/\s:@]{3,})@"), 1),
+    ("secret-assignment", re.compile(
+        rb"(?i)\b(?:x-csrf-token|csrf[_-]?token|set-cookie|"
+        rb"api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|refresh[_-]?token|"
+        rb"session[_-]?(?:id|token)|auth[_-]?token|password|passwd|pwd)"
+        rb"[\"']?\s*[:=]\s*[\"']?([^\s\"';,&\[\]]{6,})"), 1),
+)
+
+
+def _secret_spans(data: bytes) -> list:
+    """Every (start, end, category) span in `data` matching a secret pattern. For
+    a group>0 pattern the span is that group (mask the value, keep the label);
+    else the whole match. Deterministic: finditer order + a stable sort. Empty
+    (zero-width) matches are skipped so redaction can never loop."""
+    spans = []
+    for category, rx, group in SECRET_PATTERNS:
+        for m in rx.finditer(data):
+            s, e = (m.span(group) if group and m.group(group) is not None else m.span(0))
+            if e > s:
+                spans.append((s, e, category))
+    spans.sort(key=lambda t: (t[0], t[1]))
+    return spans
+
+
+def _merge_spans(spans: list) -> list:
+    """Merge overlapping/touching spans into non-overlapping (start, end, label)
+    runs; a run's label joins its distinct categories, sorted, so it is
+    deterministic (`jwt+secret-assignment`)."""
+    merged = []
+    for s, e, cat in spans:
+        if merged and s <= merged[-1][1]:
+            ps, pe, cats = merged[-1]
+            merged[-1] = (ps, max(pe, e), cats | {cat})
+        else:
+            merged.append((s, e, {cat}))
+    return [(s, e, "+".join(sorted(cats))) for s, e, cats in merged]
+
+
+def _redact_bytes(data: bytes, merged: list) -> bytes:
+    """Replace each merged secret span with a fixed, category-labelled
+    placeholder. Deterministic (same input -> same output -> same sha256); the
+    placeholder cannot re-match a pattern, so redaction is idempotent."""
+    if not merged:
+        return data
+    out = bytearray()
+    pos = 0
+    for s, e, label in merged:
+        out += data[pos:s]
+        out += b"[REDACTED:" + label.encode("ascii", "replace") + b"]"
+        pos = e
+    out += data[pos:]
+    return bytes(out)
+
+
+def _secret_policy(captures: list, redact: bool, scan: bool) -> tuple:
+    """Apply the opt-in secret policy to a list of (label, raw_bytes) captures.
+
+    Returns (recorded, gaps, note):
+      * recorded: {label: bytes} -- masked bytes when --redact matched, else the
+        raw bytes (so callers hash/write exactly what belongs in the artifact).
+      * gaps: bundle gap dicts. --redact records an ADVISORY gap per masked
+        capture (the secret is gone, so it does not block, but the mutation is
+        disclosed). --scan-secrets records a BLOCKER gap per capture that still
+        matches after redaction, so an obvious live secret cannot pass the gate.
+      * note: a one-line stderr summary of what was redacted, or None.
+    Fail-closed: if scanning itself errors, the capture is left unmodified and a
+    blocker gap is recorded (treated as unverified) rather than silently passed.
+    No gap or note ever contains a secret byte -- only category, count, label."""
+    recorded, gaps, redacted_summ = {}, [], []
+    for label, raw in captures:
+        try:
+            merged = _merge_spans(_secret_spans(raw))
+        except Exception as e:  # noqa: BLE001 - a scan failure must not pass silently
+            recorded[label] = raw
+            if redact or scan:
+                gaps.append({
+                    "id": f"secret-scan-error-{label}", "severity": "blocker",
+                    "desc": f"could not scan {label} for secrets ({type(e).__name__}); treating it as "
+                            f"unverified. Redact or clear the capture by hand before publishing.",
+                    "dismissed": False})
+            continue
+        if redact and merged:
+            recorded[label] = _redact_bytes(raw, merged)
+            cats = sorted({c for _, _, c in merged})
+            gaps.append({
+                "id": f"redacted-{label}", "severity": "advisory",
+                "desc": f"redacted {len(merged)} likely-secret span(s) [{', '.join(cats)}] from {label} "
+                        f"before writing the artifact, so the recorded capture is NOT the raw bytes. "
+                        f"Heuristic scan -- a clean pass is not proof; hand-review before publishing.",
+                "dismissed": False})
+            redacted_summ.append(f"{label}={len(merged)}")
+        else:
+            recorded[label] = raw
+        if scan:
+            residual = _merge_spans(_secret_spans(recorded[label]))
+            if residual:
+                cats = sorted({c for _, _, c in residual})
+                gaps.append({
+                    "id": f"secret-in-{label}", "severity": "blocker",
+                    "desc": f"{label} contains {len(residual)} likely secret(s) [{', '.join(cats)}]; "
+                            f"blocking so a live secret is not shipped in evidence. Redact (--redact) or "
+                            f"remove it before publishing. Heuristic scan -- a clean scan is not proof.",
+                    "dismissed": False})
+    note = (f"rung run: --redact masked likely secrets ({', '.join(redacted_summ)}); heuristic -- "
+            f"hand-review before publishing" if redacted_summ else None)
+    return recorded, gaps, note
+
+
+def _secret_safe_argv(argv: list, redact: bool, scan: bool, label: str) -> tuple:
+    """Guard the INVOCATION that the bundle echoes back, not just the captures.
+
+    rung copies the probe's argv verbatim into free-text and metadata fields
+    (`change.s0`/`change.s1`, the claim, `how_established`, and the
+    `differential.sN.argv` arrays). `_secret_policy` guards only the captured
+    stdout/stderr, so a secret passed ON THE COMMAND LINE (e.g. a token as a flag
+    value) would otherwise ship in the evidence bundle even under
+    `--scan-secrets`. Returns `(safe_argv, gaps)`:
+      * `safe_argv`: each secret span masked when `--redact` (else the token
+        unchanged); callers MUST derive every echoed string/array from it.
+      * `gaps`: one advisory when `--redact` masked any span, plus one blocker
+        under `--scan-secrets` if any token still matches after the optional
+        redaction, so a live command-line secret cannot pass the gate.
+    Off unless `--redact`/`--scan-secrets` is passed (verbatim default preserved).
+    Fail-closed: a scan error masks nothing and records a blocker gap.
+    No gap ever contains a secret byte -- only category and count."""
+    if not (redact or scan):
+        return argv, []
+    gaps, masked, residual_cats = [], 0, set()
+    safe = []
+    for tok in argv:
+        raw = tok.encode("utf-8", "surrogatepass")
+        try:
+            merged = _merge_spans(_secret_spans(raw))
+        except Exception as e:  # noqa: BLE001 - a scan failure must not pass silently
+            safe.append(tok)
+            gaps.append({
+                "id": f"secret-scan-error-{label}", "severity": "blocker",
+                "desc": f"could not scan the {label} for secrets ({type(e).__name__}); treating it "
+                        f"as unverified. Remove the secret from the command line by hand.",
+                "dismissed": False})
+            continue
+        if redact and merged:
+            safe.append(_redact_bytes(raw, merged).decode("utf-8", "replace"))
+            masked += len(merged)
+        else:
+            safe.append(tok)
+        if scan:
+            residual_cats |= {c for _, _, c in _merge_spans(_secret_spans(
+                safe[-1].encode("utf-8", "surrogatepass")))}
+    if masked:
+        gaps.append({
+            "id": f"redacted-{label}", "severity": "advisory",
+            "desc": f"redacted {masked} likely-secret span(s) from the {label} before writing it "
+                    f"into the bundle, so the recorded invocation is NOT verbatim. Heuristic scan -- "
+                    f"a clean pass is not proof; hand-review before publishing.",
+            "dismissed": False})
+    if scan and residual_cats:
+        gaps.append({
+            "id": f"secret-in-{label}", "severity": "blocker",
+            "desc": f"the {label} contains likely secret(s) [{', '.join(sorted(residual_cats))}]; "
+                    f"blocking so a live secret is not shipped in the bundle. Pass the secret through "
+                    f"the environment instead (use --env-clear to keep it out of captures too), or "
+                    f"--redact it. Heuristic scan -- a clean scan is not proof.",
+            "dismissed": False})
+    return safe, gaps
 
 
 def _artifact(out: pathlib.Path, name: str, role: str, data: bytes) -> dict:
@@ -499,20 +737,26 @@ def main(argv: list[str] | None = None) -> int:
         print("rung run: no probe given (expected `-- <argv> ...`)", file=sys.stderr)
         return gate.EXIT_USAGE
     if ns.diff:
-        if ns.rung != 4:
-            print(f"rung run: --diff is the rung-4 differential mode; use --rung 4 "
-                  f"(got --rung {ns.rung})", file=sys.stderr)
+        # --diff IS the differential method; it is a way of evaluating a runtime
+        # observation, so it lives at rung 1 (observed) and emits method=differential.
+        if ns.rung != 1:
+            print(f"rung run: --diff is the differential method (a runtime observation); "
+                  f"use --rung 1 (got --rung {ns.rung})", file=sys.stderr)
             return gate.EXIT_USAGE
-    elif ns.rung == 4:
-        print("rung run: refusing --rung 4 without --diff: rung 4 needs an S0/S1 differential "
-              "(two runs); a single-run witness cannot earn it. Re-run with --diff and "
-              "`-- <S0 argv> ::: <S1 argv>`.", file=sys.stderr)
-        return gate.EXIT_USAGE
-    elif not (0 <= ns.rung <= 3):
-        print(f"rung run: refusing --rung {ns.rung}: rung must be 0..3 (or 4 with --diff)",
-              file=sys.stderr)
-        return gate.EXIT_USAGE
-    if not ns.diff:
+        if ns.method not in ("single", "differential"):
+            print(f"rung run: --diff emits method=differential; --method {ns.method} conflicts",
+                  file=sys.stderr)
+            return gate.EXIT_USAGE
+    else:
+        if not (0 <= ns.rung <= 1):
+            print(f"rung run: refusing --rung {ns.rung}: rung must be 0 (not observed) or "
+                  f"1 (observed)", file=sys.stderr)
+            return gate.EXIT_USAGE
+        if ns.method == "differential":
+            print("rung run: --method differential requires --diff: a differential is an S0/S1 "
+                  "two-run comparison; a single run cannot produce one. Re-run with --diff and "
+                  "`-- <S0 argv> ::: <S1 argv>`.", file=sys.stderr)
+            return gate.EXIT_USAGE
         # Differential-only flags silently dropped on a single run would discard
         # the operator's differential intent; reject them instead (fail closed).
         stray = [f for f, set_ in (("--expect-delta", ns.expect_delta != "change"),
@@ -520,8 +764,8 @@ def main(argv: list[str] | None = None) -> int:
                                    ("--s0-cwd", ns.s0_cwd is not None),
                                    ("--s1-cwd", ns.s1_cwd is not None)) if set_]
         if stray:
-            print(f"rung run: {', '.join(stray)} only apply with --diff (the rung-4 "
-                  f"differential mode)", file=sys.stderr)
+            print(f"rung run: {', '.join(stray)} only apply with --diff (the differential "
+                  f"method)", file=sys.stderr)
             return gate.EXIT_USAGE
     if ns.expect_frames is not None and ns.expect_frames < 1:
         print("rung run: --expect-frames must be >= 1", file=sys.stderr)
@@ -593,10 +837,10 @@ def main(argv: list[str] | None = None) -> int:
                         f"and the run did not complete.",
                 "dismissed": False,
             })
-        elif ns.rung >= 3 and (len(out_bytes) + len(err_bytes)) == 0:
+        elif ns.rung == 1 and (len(out_bytes) + len(err_bytes)) == 0:
             # Observing nothing (from a process that RAN TO COMPLETION) is not
-            # observation: refuse rather than mint a pass (finding #1).
-            print(f"rung run: refusing rung {ns.rung}: the probe ran to completion but produced "
+            # observation: refuse rather than mint a rung-1 pass (finding #1).
+            print(f"rung run: refusing rung 1 (observed): the probe ran to completion but produced "
                   f"zero bytes on stdout/stderr; nothing was observed", file=sys.stderr)
             return gate.EXIT_USAGE
 
@@ -614,17 +858,31 @@ def main(argv: list[str] | None = None) -> int:
                 "dismissed": False,
             })
 
+        # Opt-in secret handling runs on the RAW captured bytes, before they are
+        # hashed/written, so a redacted artifact's sha256 is of the redacted
+        # content and a scan sees exactly what would ship. Off unless asked.
+        recorded, secret_gaps, secret_note = _secret_policy(
+            [("stdout_capture", out_bytes), ("stderr_capture", err_bytes)],
+            ns.redact, ns.scan_secrets)
+        gaps.extend(secret_gaps)
+
         out = pathlib.Path(ns.out)
         artifacts = [
-            _artifact(out, "stdout", "stdout_capture", out_bytes),
-            _artifact(out, "stderr", "stderr_capture", err_bytes),
+            _artifact(out, "stdout", "stdout_capture", recorded["stdout_capture"]),
+            _artifact(out, "stderr", "stderr_capture", recorded["stderr_capture"]),
         ]
 
-        executed = _resolve_exec(probe)
+        # Guard the invocation echoed into the bundle's free-text/metadata fields
+        # (finding: a secret passed on the command line leaks past _secret_policy,
+        # which only sees the captures). Everything below derives from safe_probe.
+        safe_probe, argv_gaps = _secret_safe_argv(probe, ns.redact, ns.scan_secrets, "invocation")
+        gaps.extend(argv_gaps)
+
+        executed = _resolve_exec(safe_probe)
         executed["exit"] = res["returncode"]  # int, or null if we killed it / it timed out
 
         verdict = forced_verdict or ns.verdict
-        probe_str = " ".join(probe)
+        probe_str = " ".join(safe_probe)
         bundle = {
             "schema": gate.SCHEMA_MAJOR,
             "change": {
@@ -645,6 +903,7 @@ def main(argv: list[str] | None = None) -> int:
                     "executed": executed,
                 },
                 "rung": ns.rung,
+                "method": ns.method,
                 # A self-run is BY DEFINITION author context; cross-lab is a judge's
                 # job, never something the producer's own runner can assert.
                 "context": "author",
@@ -652,17 +911,17 @@ def main(argv: list[str] | None = None) -> int:
                 "how_established": (
                     f"rung run executed `{probe_str}` directly (no shell); "
                     f"captured its own stdout/stderr; {exit_note}. "
-                    f"The rung and surface are declared, not witnessed by this tool."
+                    f"The rung, method, and surface are declared, not witnessed by this tool."
                 ),
                 "artifacts": artifacts,
             }],
             "gaps": gaps,
         }
-        return _finish(bundle, out, policy, policy_sha, policy_file, ns.no_gate, exit_note)
+        return _finish(bundle, out, policy, policy_sha, policy_file, ns.no_gate, exit_note, secret_note)
 
 
 def _finish(bundle: dict, out: pathlib.Path, policy, policy_sha, policy_file,
-            no_gate: bool, note: str) -> int:
+            no_gate: bool, note: str, secret_note: str | None = None) -> int:
     """Shared tail for both the single-run and --diff paths: stamp the pinned
     policy, write the bundle + captures, then (unless --no-gate) re-verify the
     policy against the launch-time sha and run the gate, exiting with ITS
@@ -676,8 +935,11 @@ def _finish(bundle: dict, out: pathlib.Path, policy, policy_sha, policy_file,
     out.mkdir(parents=True, exist_ok=True)
     (out / "bundle.json").write_text(json.dumps(bundle, indent=2, ensure_ascii=False))
     print(f"rung run: wrote {out / 'bundle.json'} ({note})", file=sys.stderr)
-    print("rung run: captures may contain secrets; redact before publishing (operator responsibility)",
-          file=sys.stderr)
+    if secret_note:
+        print(secret_note, file=sys.stderr)
+    else:
+        print("rung run: captures may contain secrets; redact before publishing (operator "
+              "responsibility; see --redact / --scan-secrets)", file=sys.stderr)
 
     if no_gate:
         return gate.EXIT_PASS
@@ -735,8 +997,9 @@ def _channel_artifact(res: dict, channel: str) -> bytes:
 
 
 def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> int:
-    """Rung-4 differential: run S0 then S1, capture each off its own fds, and emit
-    a rung-4 bundle with exactly one s0_capture and one s1_capture. This tool does
+    """Differential METHOD (rung 1): run S0 then S1, capture each off its own fds,
+    and emit a rung-1 method=differential bundle with exactly one s0_capture and
+    one s1_capture. This tool does
     NOT decide the delta: it captures both sides faithfully and lets the gate rule
     change/invariance from the bytes. Both sides reuse the single bounded exec
     path, so the memory-cap and process-group-reap guarantees carry over per run."""
@@ -760,7 +1023,7 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
     # identical code read as a change, and an invariant refactor carrying
     # such noise would read as a delta. So a side whose two runs disagree on the
     # compared channel is recorded as a blocker gap rather than fed to the gate as
-    # a trustworthy delta. This is FINDINGS.md's rung-4 normalization concern made
+    # a trustworthy delta. This is FINDINGS.md's differential normalization concern made
     # into a recorded gap instead of a silent normalization. A side that HUNG is
     # already a block, so its stability is moot and the re-run is skipped.
     sides = []  # (label, argv, cwd, res, stable)
@@ -808,7 +1071,10 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
                         f"({ns.diff_channel}) across two identical runs; its output is not "
                         f"deterministic, so a byte-level S0/S1 delta cannot be trusted to reflect "
                         f"the claimed change. Pin the environment (or compare a stable channel) and "
-                        f"re-run.",
+                        f"re-run. If the nondeterminism IS the defect under test (e.g. a timestamp "
+                        f"leaking onto stdout), a byte delta cannot prove the fix -- witness the fixed "
+                        f"side's purity and stability directly instead (single-run --expect-frames + a "
+                        f"self-invariance --diff).",
                 "dismissed": False})
         if res.get("truncated"):
             gaps.append({
@@ -819,7 +1085,7 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
         if len(_channel_real(res, ns.diff_channel)) == 0:
             empties.append(label)
     if empties and forced_verdict is None:
-        print(f"rung run: refusing rung 4: {', '.join(empties)} ran to completion but produced zero "
+        print(f"rung run: refusing differential: {', '.join(empties)} ran to completion but produced zero "
               f"bytes on the compared channel ({ns.diff_channel}); nothing was observed to diff. Try "
               f"--diff-channel both, or the channel the surface actually writes to.",
               file=sys.stderr)
@@ -829,14 +1095,50 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
     s0_res, s1_res = sides[0][3], sides[1][3]
     s0_bytes = _channel_artifact(s0_res, ns.diff_channel)
     s1_bytes = _channel_artifact(s1_res, ns.diff_channel)
+    # The determinism check above compared the RAW compared-channel bytes, so a
+    # per-session token still trips nondeterministic-output (redaction is a
+    # publishing transform, not a determinism fix). Secret handling applies only
+    # to what gets written/hashed, keeping s0_observed/s1_observed self-consistent
+    # with the artifacts. Off unless --redact / --scan-secrets is passed.
+    raw_equal = (s0_bytes == s1_bytes)
+    recorded, secret_gaps, secret_note = _secret_policy(
+        [("s0_capture", s0_bytes), ("s1_capture", s1_bytes)], ns.redact, ns.scan_secrets)
+    gaps.extend(secret_gaps)
+    s0_bytes, s1_bytes = recorded["s0_capture"], recorded["s1_capture"]
+    # The gate decides polarity from the WRITTEN (post-redaction) capture hashes,
+    # but the determinism check above ran on the RAW bytes. If the secret transform
+    # changed the S0<->S1 relationship (e.g. two runs that differ only in a
+    # secret-shaped token collapse to identical redacted captures), the written
+    # captures no longer reflect the real delta: an invariance claim would get a
+    # FALSE pass, and a change claim a spurious no-delta block. Refuse to certify a
+    # differential the publishing transform silently altered.
+    if (s0_bytes == s1_bytes) != raw_equal:
+        forced_verdict = "blocked"
+        gaps.append({
+            "id": "redaction-altered-differential", "severity": "blocker",
+            "desc": "the secret transform (--redact/--scan-secrets) changed the S0/S1 "
+                    "relationship on the compared channel: the written captures differ "
+                    "from the real runs, so the differential cannot be trusted. Re-run "
+                    "without redaction on the compared channel, or diff a channel that "
+                    "carries no secret-shaped values.",
+        })
     art_s0 = _artifact(out, "s0_capture", "s0_capture", s0_bytes)
     art_s1 = _artifact(out, "s1_capture", "s1_capture", s1_bytes)
 
+    # Guard the two invocations echoed into the bundle's free-text/metadata fields
+    # (change.s0/s1, the claim, how_established, differential.sN.argv). The raw
+    # argv already drove the runs and the determinism/resolve checks above; from
+    # here every echoed string/array is derived from the secret-safe view.
+    safe_s0_argv, s0_argv_gaps = _secret_safe_argv(s0_argv, ns.redact, ns.scan_secrets, "s0-invocation")
+    safe_s1_argv, s1_argv_gaps = _secret_safe_argv(s1_argv, ns.redact, ns.scan_secrets, "s1-invocation")
+    gaps.extend(s0_argv_gaps)
+    gaps.extend(s1_argv_gaps)
+
     executed = {
-        "s0": {**_resolve_exec(s0_argv, ns.s0_cwd), "exit": s0_res["returncode"], "cwd": ns.s0_cwd},
-        "s1": {**_resolve_exec(s1_argv, ns.s1_cwd), "exit": s1_res["returncode"], "cwd": ns.s1_cwd},
+        "s0": {**_resolve_exec(safe_s0_argv, ns.s0_cwd), "exit": s0_res["returncode"], "cwd": ns.s0_cwd},
+        "s1": {**_resolve_exec(safe_s1_argv, ns.s1_cwd), "exit": s1_res["returncode"], "cwd": ns.s1_cwd},
     }
-    s0_str, s1_str = " ".join(s0_argv), " ".join(s1_argv)
+    s0_str, s1_str = " ".join(safe_s0_argv), " ".join(safe_s1_argv)
     exit_note = f"s0 {s0_res['note']}; s1 {s1_res['note']}"
     verdict = forced_verdict or ns.verdict
     bundle = {
@@ -857,7 +1159,8 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
                 "how_reached": f"rung run --diff direct-exec of two runs; {exit_note}",
                 "executed": executed,
             },
-            "rung": 4,
+            "rung": 1,
+            "method": "differential",
             # A self-run is BY DEFINITION author context, differential or not;
             # cross-lab is a judge's job, never the producer's own runner.
             "context": "author",
@@ -865,9 +1168,9 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
             "verdict": verdict,
             "how_established": (
                 f"rung run --diff executed S0 `{s0_str}` then S1 `{s1_str}` directly (no shell); "
-                f"captured each run's {ns.diff_channel}; {exit_note}. The rung, surface, and "
-                f"expected_delta are declared; the delta polarity is decided by the gate from the "
-                f"captured bytes, not asserted by this tool."
+                f"captured each run's {ns.diff_channel}; {exit_note}. The rung, method, surface, "
+                f"and expected_delta are declared; the delta polarity is decided by the gate from "
+                f"the captured bytes, not asserted by this tool."
             ),
             "differential": {
                 "channel": ns.diff_channel,
@@ -878,9 +1181,9 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
                 # while the polarity verdict is still the gate's, from the bytes.
                 "s0_observed": art_s0["sha256"],
                 "s1_observed": art_s1["sha256"],
-                "s0": {"argv": s0_argv, "cwd": ns.s0_cwd, "exit": s0_res["returncode"],
+                "s0": {"argv": safe_s0_argv, "cwd": ns.s0_cwd, "exit": s0_res["returncode"],
                        "bytes": len(s0_bytes)},
-                "s1": {"argv": s1_argv, "cwd": ns.s1_cwd, "exit": s1_res["returncode"],
+                "s1": {"argv": safe_s1_argv, "cwd": ns.s1_cwd, "exit": s1_res["returncode"],
                        "bytes": len(s1_bytes)},
                 "note": ("faithful record of two runs; the gate decides change/invariance from the "
                          "s0_capture/s1_capture bytes, this block does not assert the delta"),
@@ -889,7 +1192,7 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
         }],
         "gaps": gaps,
     }
-    return _finish(bundle, out, policy, policy_sha, policy_file, ns.no_gate, exit_note)
+    return _finish(bundle, out, policy, policy_sha, policy_file, ns.no_gate, exit_note, secret_note)
 
 
 def _split_sides(probe: list[str]) -> tuple[list[str], list[str] | None]:
