@@ -78,7 +78,7 @@ class GateCase(unittest.TestCase):
         self.assertTrue(any("independent" in x for x in r["reasons"]))
 
     def test_cross_model_panel_passes_at_high(self):
-        """The release-gate case reaches the bottom-right cell: an independent
+        """The release-gate case reaches the top-right cell: an independent
         cross-model panel that ran the surface clears high under the default
         policy (which demands independent + a cross-model qualifier at high)."""
         b = json.loads(CROSS_MODEL_PANEL.read_text())

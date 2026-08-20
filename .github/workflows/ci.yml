@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           b=gate/cases/rung-cross-model-run-panel/bundle.json
-          # The bottom-right cell: independent context + a cross-model attestation
+          # The top-right cell: independent context + a cross-model attestation
           # clears high; the same panel is not cross-lab, so critical blocks.
           python -m rung.gate "$b" --tier high
           if python -m rung.gate "$b" --tier critical; then

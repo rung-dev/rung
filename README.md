@@ -95,16 +95,19 @@ answers are your rung:
    rung **0** = no (reasoning, or tests in isolation) · rung **1** = yes (drove the real surface)
 2. **Who checked: the author, or someone independent?**
 
-|                                    | author checked            | independent checked                |
-|------------------------------------|---------------------------|------------------------------------|
-| **rung 0**: reasoned / ran tests   | "read the diff", green CI | a reviewer who also only read it   |
-| **rung 1**: ran the real thing     | ran it themselves         | ✅ ran it *and* someone independent |
+|                                  | by the author        | independent                                    |
+|----------------------------------|----------------------|------------------------------------------------|
+| **rung 1**: ran the real thing   | it ran, self-checked | ★ **the aim**: ran it, independently confirmed |
+| **rung 0**: reasoned / ran tests | you have its word    | a second read of the same diff                 |
 
-Most work sits in the top row: "verified" backed by reasoning, not by running the real
-thing. Review moves you across that row (it adds a reader's judgment) but leaves you at
-rung 0, where a change reads as verified though nobody ran it. Only running reaches rung 1.
-rung rewards the bottom-right most: a real run, by someone other than the author. A real
-run by the author still clears low-stakes changes; higher stakes call for the bottom-right.
+> [!TIP]
+> **The aim is the top-right cell**: a real run, confirmed by someone other than the author.
+
+Most work sits in the bottom row instead, "verified" backed by reasoning, not by running
+the real thing. Review moves you across that row (it adds a reader's judgment) but leaves
+you at rung 0, where a change reads as verified though nobody ran it. Only running reaches
+the top row, rung 1. A real run by the author still clears low-stakes changes; higher
+stakes call for the top-right.
 
 By default rung's policy says **shipped means observed**: nothing ships on reasoning alone,
 and the more a change would cost if it's wrong, the more independence it asks for.

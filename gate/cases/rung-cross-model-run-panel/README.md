@@ -1,6 +1,6 @@
 # Case: rung verifying itself (independent cross-model run panel)
 
-*At which rung did your agent verify?* This case is the bottom-right cell of
+*At which rung did your agent verify?* This case is the top-right cell of
 rung's own grid: an **independent** party that **ran** the real surface, not merely
 read it. It builds on the sibling
 [`rung-self-verdict-determinism`](../rung-self-verdict-determinism/) case, which

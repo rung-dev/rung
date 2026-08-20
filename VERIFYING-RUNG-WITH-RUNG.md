@@ -173,9 +173,9 @@ in three cells of its own grid, by three methods:
 - **Independent and cross-model**, from the blind review panel: a review, rung 0.
 - **A real run under a differential method**, from the author: rung 1, author.
 - **An independent cross-model panel that ran the surface**: rung 1, independent, the
-  bottom-right cell, cleared at high.
+  top-right cell, cleared at high.
 
-The bottom-right cell, an independent party running the real surface, is the bar
+The top-right cell, an independent party running the real surface, is the bar
 rung sets for high-risk change, and the cross-model run panel above reaches it at
 high. Cross-lab, the strongest qualifier, is reserved for critical tier and asks
 for a second organization. The gate refuses to let a same-lab review pose as one:
