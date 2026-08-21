@@ -4,6 +4,7 @@ rung package (rung.gate and rung.run), upgraded to a gh / kubectl level of
 robustness while staying stdlib-only, deterministic, and dependency-free:
 
     rung run    [global] SURFACE-ARGS     witness an execution, emit + gate a bundle
+    rung attest [global] BUNDLE [POLICY]   record an independent attestation, re-gate
     rung gate   [global] BUNDLE [POLICY]   gate an already-authored bundle (JSON to stdout)
     rung check  [global] BUNDLE [POLICY]   alias for gate
     rung doctor [global] [BUNDLE]          read-only preflight; exit 0/2 only
@@ -45,8 +46,8 @@ import sys
 
 # Every command word rung recognizes; the difflib pool for "did you mean" is the
 # runnable subset (suggesting `help` on a typo is unhelpful).
-COMMANDS = ("run", "gate", "check", "doctor", "version", "skill", "help")
-_SUGGESTABLE = ("run", "gate", "check", "doctor", "version", "skill")
+COMMANDS = ("run", "attest", "gate", "check", "doctor", "version", "skill", "help")
+_SUGGESTABLE = ("run", "attest", "gate", "check", "doctor", "version", "skill")
 
 
 def _import_gate():
@@ -71,6 +72,11 @@ except Exception as _e:  # pragma: no cover - exercised only on a broken gate.py
 def _import_run():
     from . import run
     return run
+
+
+def _import_attest():
+    from . import attest
+    return attest
 
 
 # --- presentation (stderr only) -------------------------------------------
@@ -144,6 +150,23 @@ def _build_parser():
             "including everything after `--` (the probe argv). This dispatcher\n"
             "forwards them, so the full witness surface (--rung, --method,\n"
             "--surface, --diff, ...) is listed by `python -m rung.run -h`.\n\n"
+            + _EXIT_LINE))
+
+    sub.add_parser(
+        "attest", parents=[parent], add_help=True, allow_abbrev=False,
+        help="record an independent attestation on a bundle, then re-gate it",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Record an independent reviewer's attestation on an existing bundle, lift the "
+                    "claim to context=independent, and re-gate. The amended bundle is printed to "
+                    "stdout; the exit code is the gate's verdict.",
+        epilog=(
+            "Examples:\n"
+            "  rung attest --model reviewer-x --verdict pass bundle.json\n"
+            "  rung attest --panel a:pass,b:pass --verdict pass bundle.json\n"
+            "  rung attest --model reviewer-x --lab lab-b --verdict pass bundle.json policy.json\n\n"
+            "All args after the command are passed through to rung.attest verbatim; the\n"
+            "full flag surface (--model/--panel, --verdict, --lab, --claim-id,\n"
+            "--require-artifacts, --tier) is listed by `python -m rung.attest -h`.\n\n"
             + _EXIT_LINE))
 
     for name, blurb in (("gate", "gate an already-authored bundle"),
@@ -286,6 +309,14 @@ def _doctor(bundle, quiet, color):
     if run_mod is not None:
         rsha = _file_sha256(run_mod.__file__) or "unknown"
         checks.append((True, "run.py imports; sha256=" + rsha))
+
+    try:
+        attest_mod = _import_attest()
+    except Exception as e:  # noqa: BLE001 - report any import failure, do not crash
+        checks.append((False, "attest.py import FAILED: " + str(e)))
+    else:
+        asha = _file_sha256(attest_mod.__file__) or "unknown"
+        checks.append((True, "attest.py imports; sha256=" + asha))
 
     if bundle is not None:
         if _GATE is None:
@@ -464,6 +495,25 @@ def main(argv=None):
         except Exception as e:  # noqa: BLE001 - any run-internal crash fails closed
             _error("run failed to evaluate: " + type(e).__name__ + ": " + str(e),
                    hint="this is a run-internal error; run `rung doctor` to diagnose.",
+                   color=color)
+            return EXIT_USAGE
+
+    if args.command == "attest":
+        # Same posture as run/gate: in-process so stdout stays the exact amended
+        # bundle bytes; an import failure or unexpected internal exception fails
+        # closed to exit 2, while attest's in-contract SystemExit (argparse usage)
+        # and its 0/30/2 returns propagate untouched.
+        try:
+            attest_mod = _import_attest()
+        except Exception as e:  # noqa: BLE001 - any import failure must fail closed
+            _error("attest failed to import: " + str(e),
+                   hint="run `rung doctor` to diagnose.", color=color)
+            return EXIT_USAGE
+        try:
+            return attest_mod.main(extras)
+        except Exception as e:  # noqa: BLE001 - any attest-internal crash fails closed
+            _error("attest failed to evaluate: " + type(e).__name__ + ": " + str(e),
+                   hint="this is an attest-internal error; run `rung doctor` to diagnose.",
                    color=color)
             return EXIT_USAGE
 

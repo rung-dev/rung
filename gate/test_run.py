@@ -133,6 +133,33 @@ class RunConformance(unittest.TestCase):
         self.assertIn("differential", (r.stdout + r.stderr).lower())
         self.assertIn("--diff", r.stdout + r.stderr)
 
+    # --- producer.model (--model) -----------------------------------------
+    # --model records WHICH model produced the change, verbatim, into
+    # change.producer.model. It is optional and has no default: without it the
+    # producer keeps its {agent, lab} shape (no model key, never null).
+    def test_model_records_producer_model_single(self):
+        fix = self.cli_fixture()
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
+                        "--model", "some-model-v2", "--", sys.executable, str(fix))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.bundle()["change"]["producer"]["model"], "some-model-v2")
+
+    def test_model_records_producer_model_diff(self):
+        r = self.run_it("--rung", "1", "--surface", "cli", "--diff", "--expect-delta", "change",
+                        "--model", "some-model-v2",
+                        "--", *self._pyc("print('A')"), ":::", *self._pyc("print('B')"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.bundle()["change"]["producer"]["model"], "some-model-v2")
+
+    def test_no_model_leaves_producer_shape_unchanged(self):
+        fix = self.cli_fixture()
+        r = self.run_it("--rung", "1", "--surface", "cli", "--tier", "low",
+                        "--", sys.executable, str(fix))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        producer = self.bundle()["change"]["producer"]
+        self.assertNotIn("model", producer)
+        self.assertEqual(producer, {"agent": "rung-run", "lab": "local"})
+
     # --- differential (--diff), at rung 1 ----------------------------------
     # The runner captures both sides faithfully and lets the GATE rule the delta
     # polarity from the bytes; it never asserts change/invariance itself.

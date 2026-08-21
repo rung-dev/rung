@@ -147,6 +147,49 @@ class RungCLI(unittest.TestCase):
         self.assertIn("rung run", r.stderr)
         self.assertNotIn("unknown command", r.stderr)
 
+    def _attest_bundle(self):
+        # A single-claim medium bundle with a real artifact, so `rung attest`
+        # anchors and the re-gate passes at context=independent.
+        import hashlib
+        art = self.tmp / "cap.txt"
+        art.write_text("captured output\n")
+        sha = hashlib.sha256(art.read_bytes()).hexdigest()
+        p = self.tmp / "bundle.json"
+        p.write_text(json.dumps({
+            "schema": "evidence-bundle/v2",
+            "change": {"repo": "x", "s0": "a", "s1": "b",
+                       "producer": {"agent": "rung-run", "lab": "lab-a"}},
+            "claims": [{
+                "id": "c1", "claim": "did a thing", "risk_tier": "medium", "rung": 1,
+                "context": "author", "method": "single", "verdict": "pass",
+                "artifacts": [{"id": "cap.txt", "role": "stdout_capture",
+                               "uri": "cap.txt", "sha256": sha}],
+                "how_established": "witnessed by rung run.",
+            }],
+            "gaps": [],
+        }))
+        return p
+
+    def test_attest_routes_to_attest_witness(self):
+        # Routes to attest.main: lifts context to independent, re-gates, exit 0,
+        # and the amended bundle is the stdout data.
+        bp = self._attest_bundle()
+        r = self.rung("attest", "--model", "reviewer-x", "--verdict", "pass", str(bp))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        b = json.loads(r.stdout)
+        self.assertEqual(b["claims"][0]["context"], "independent")
+        self.assertEqual(b["claims"][0]["attestation"]["model"], "reviewer-x")
+        self.assertNotIn(ESC, r.stdout)
+
+    def test_attest_missing_verdict_reaches_attest_usage_not_dispatcher(self):
+        # No --verdict -> attest's own argparse usage error (proves the token
+        # routed to attest.main, not the dispatcher's unknown-command path).
+        bp = self._attest_bundle()
+        r = self.rung("attest", "--model", "reviewer-x", str(bp))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("rung attest", r.stderr)
+        self.assertNotIn("unknown command", r.stderr)
+
     # -- unknown command + difflib -----------------------------------------
     def test_unknown_command_suggests_and_exits_2(self):
         r = self.rung("gato")

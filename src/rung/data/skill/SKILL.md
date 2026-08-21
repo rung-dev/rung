@@ -135,10 +135,11 @@ A **cross-model qualifier** is the strongest independence a solo rung+Claude
 operator can self-produce without faking it: the claim is `context: independent`
 *and* a *different model* than the one that produced the change re-checks it, blind.
 The gate checks this structurally (`context: independent`, a reviewer model present,
-`!= change.producer.model`, `verdict: pass`), but presence is not proof the review
-happened, was blind, or that the models fail independently. Those hold only if you
-run the protocol below. Claiming the qualifier when no different model re-derived
-the verdict is the same lie as forging a cross-lab attestation.
+`!= change.producer.model`, `verdict: pass`, and the attestation byte-bound to the
+gate's own verified artifact hashes), but presence is not proof the review happened,
+was blind, or that the models fail independently. Those hold only if you run the
+protocol below. Claiming the qualifier when no different model re-derived the verdict
+is the same lie as forging a cross-lab attestation.
 
 **The review contract**, what a cross-model qualifier `pass` must mean:
 
@@ -161,18 +162,22 @@ evidence a panel can supply.
 
 **The protocol**, as the operating agent:
 
-1. Set `change.producer.model` to the model that produced the change. Without it
-   the gate cannot define model independence and blocks.
+1. Record `change.producer.model` when you produce the bundle: `rung run --model
+   <producer-model> ...`. Without it the gate cannot define model independence and
+   blocks a required cross-model qualifier.
 2. Spawn one or more reviewer subagents, each pinned to a model `!=` the
    producer's. For a panel, use two or more distinct non-producer models.
 3. Give each reviewer only the claim, the risk tier, and the artifacts, never the
    producer's reasoning or verdict. Ask it to independently decide whether the
    artifacts establish the claim, returning `pass`/`fail` and a one-line reason.
-4. Record it on the claim's `attestation`: a single reviewer as
-   `{ "model": "<reviewer-model>", "verdict": "pass" }`, or a panel as
-   `{ "panel": [ { "model": "...", "verdict": "pass" }, … ], "verdict": "pass" }`.
-5. Gate it. The gate confirms every reviewer model differs from the producer's and
-   every verdict is `pass`; anything else blocks.
+4. Record the review with `rung attest`, which lifts the claim to `independent`,
+   byte-binds the verdict to the recorded artifacts, and re-gates in one step:
+   `rung attest --model <reviewer-model> --verdict pass bundle.json`, or a panel
+   with `--panel modelA:pass,modelB:pass --verdict pass`. Run it where the review
+   happened, so it hashes the same artifacts the reviewer read; if the reviewer had
+   no artifact access, attest discloses the verdict as unbound rather than minting a
+   byte-bound pass. `rung attest` exits with the gate's verdict, so a rejected review
+   is a non-zero exit, not a silent record.
 
 Do not weaken the blindness to reach a pass. If a reviewer needs producer context
 to agree, the claim does not earn the cross-model qualifier. Record a gap and

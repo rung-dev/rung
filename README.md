@@ -21,6 +21,8 @@ happened, and turns that into a record you can re-check.**
         ▼
   bundle.json ──  the record: what ran, what it printed, sha256 of each capture
         │
+        │  (optional) rung attest ──►  a second model/lab re-checks the record,
+        │                              lifting the claim to independent context
         ▼
   rung gate ──►  plain deterministic check, no AI, no network
         │
@@ -164,7 +166,7 @@ surface observed), **`--surface`** (`cli`, `server`, `library`, `gui`, `agent`, 
 **`--method`** (`single`, or `differential` with `--expect-delta` and `--diff-channel` for
 a before/after comparison). `rung run -h` lists the full set. There is no independence flag:
 a self-run is always author context, and an independent cross-model review is attached to
-the record separately.
+the record separately with `rung attest` (below).
 
 The exit code is a contract, so a gate step is unambiguous in CI:
 
@@ -182,7 +184,20 @@ Already have a recorded claim? Check it on its own:
 rung gate claim.json
 ```
 
-That's the whole surface: **`run`** to produce a checked record, **`gate`** to check one.
+An author-context record is a self-run. To attach an independent review, a second
+model or lab re-checks the recorded artifacts and records its verdict:
+
+```bash
+rung attest --model reviewer-x --verdict pass claim.json > reviewed.json
+```
+
+That lifts the claim to `independent` context and re-gates it, exiting with the gate's
+verdict. It is the only way to reach `independent`; a reviewer with no access to the
+recorded artifacts is disclosed as unbound, never minted into a byte-bound pass. A panel
+(`--panel a:pass,b:pass`) or a cross-lab review (`--lab lab-b`) records the same way.
+
+That's the whole surface: **`run`** to produce a checked record, **`attest`** to attach an
+independent review, **`gate`** to check one.
 
 ## Who rung is for
 

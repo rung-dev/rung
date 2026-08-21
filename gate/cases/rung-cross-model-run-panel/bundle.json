@@ -54,6 +54,7 @@
         "judge_id": "blind-cross-model-run-panel",
         "verdict": "pass",
         "lab": "rung-dev",
+        "artifact_shas": ["96cd3f2b98014d527b1b17849e1db6063fc2a583ad2d6060db7c56656a46cddc"],
         "panel": [
           {
             "model": "claude-sonnet-4-5-20250929",

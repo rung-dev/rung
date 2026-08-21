@@ -48,6 +48,7 @@ to stdout unconditionally.
 
 ```
 rung run    [global] SURFACE-ARGS -- <probe>   witness an execution, emit + gate a bundle
+rung attest [global] BUNDLE [POLICY]            record an independent attestation, re-gate
 rung gate   [global] BUNDLE [POLICY]            gate an authored bundle (JSON verdict to stdout)
 rung check  [global] BUNDLE [POLICY]            alias for gate
 rung doctor [global] [BUNDLE]                   read-only preflight; exit 0/2 only
@@ -204,6 +205,39 @@ probe runs, rather than falling back to a default cap.
 **Operator note:** `rung run` *executes* its probe, so pointing it at an
 untrusted repo is arbitrary code execution. Keep it to trusted inputs. The gate
 (`rung gate`) is safe on untrusted input; it only hashes files.
+
+### rung attest
+
+Records an independent reviewer's verdict on an existing bundle, lifts the target
+claim to `context: independent`, and re-gates in one step. It is the only way to
+reach `independent`; the gate itself only ever lowers trust.
+
+```bash
+rung attest --model <reviewer-model> --verdict pass <bundle.json> [policy.json]
+rung attest --panel modelA:pass,modelB:pass --verdict pass <bundle.json>
+rung attest --model <reviewer-model> --lab lab-b --verdict pass <bundle.json>
+```
+
+- `--model` or `--panel` (exactly one): the single reviewer model, or a panel of
+  `model:verdict` pairs. The gate requires each reviewer model `!=` the producer's
+  at any tier that demands a cross-model qualifier. A panel with `--verdict pass`
+  requires every member to pass; a dissenting member is refused (exit `2`).
+- `--verdict` (required, no default): the reviewer's verdict. A `fail`/`blocked`
+  lowers the claim and the re-gate blocks.
+- `--lab` (single `--model` only): the reviewing lab, for a cross-lab qualifier.
+  Not valid with `--panel` (a panel has no single lab).
+- `--claim-id`: which claim to attest; required when the bundle has more than one.
+- `--require-artifacts`: refuse (exit `2`) rather than record an unbound
+  attestation when the claim's artifacts cannot be read.
+- `--tier`: override every claim's risk tier for the re-gate, as `rung gate --tier`.
+- `bundle` positional, or `-` / omitted for stdin; `policy` optional positional.
+
+attest byte-binds the verdict to the artifacts it re-hashes, so a review cannot be
+transplanted onto a different bundle. Run it where the review happened. If the
+reviewer had no artifact access, the verdict is disclosed as unbound rather than
+minted byte-bound; if a recomputed hash contradicts the bundle's, attest refuses
+(exit `2`, writes nothing). The amended bundle prints to stdout; the exit code is
+the gate's verdict (`0`/`30`/`2`).
 
 ### rung doctor
 

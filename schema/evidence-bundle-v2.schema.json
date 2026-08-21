@@ -100,7 +100,7 @@
       }
     },
     "attestation": {
-      "description": "Independent-review record carrying the independence QUALIFIERS. The gate enforces qualifier-conditional requirements the schema cannot express: a required cross-lab qualifier needs `lab` present and != change.producer.lab with verdict=pass; a required cross-model qualifier needs a `panel` (or a single `model`) naming >=1 reviewer model, each != change.producer.model, each verdict=pass. Both also require context=independent.",
+      "description": "Independent-review record carrying the independence QUALIFIERS. The gate enforces qualifier-conditional requirements the schema cannot express: a required cross-lab qualifier needs `lab` present and != change.producer.lab with verdict=pass; a required cross-model qualifier needs a `panel` (or a single `model`) naming >=1 reviewer model, each != change.producer.model, each verdict=pass. Both also require context=independent, and both must be byte-bound via `artifact_shas`.",
       "oneOf": [
         { "type": "null" },
         {
@@ -110,6 +110,12 @@
           "properties": {
             "lab": { "type": "string", "description": "Attesting lab. For a required cross-lab qualifier the gate requires this != change.producer.lab." },
             "model": { "type": "string", "description": "Reviewer model for a single-reviewer cross-model qualifier; the gate requires this != change.producer.model. For >1 reviewer use `panel`." },
+            "artifact_shas": {
+              "type": "array",
+              "description": "Byte-anchor binding this attestation to THIS claim's captures: the set of sha256 hashes of the claim's artifacts the reviewer verified. For a required cross-model or cross-lab qualifier the gate requires this set to equal the set of hashes it re-verified from the claim's artifacts, so a verdict cannot be transplanted onto a different bundle. An empty array does not anchor.",
+              "items": { "type": "string" }
+            },
+            "artifact_shas_note": { "type": "string", "description": "Disclosure recorded when a reviewer had no access to the claim's artifacts, so the verdict is not byte-bound (the qualifier stays unanchored)." },
             "panel": {
               "type": "array",
               "description": "Multi-reviewer cross-model panel. The gate requires every entry's model != change.producer.model and verdict=pass.",

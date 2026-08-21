@@ -522,7 +522,10 @@ class GateCase(unittest.TestCase):
         cross-lab teeth: every other check (min_rung, context, cross-model) passes,
         so the sole block reason is the missing cross-lab attestation."""
         a = self.artifact("cap.txt", "capture", b"observed\n")
-        att = {"model": "reviewer-model", "verdict": "pass"}  # cross-model ok, no lab
+        # cross-model ok and byte-bound (artifact_shas == the one verified hash),
+        # but no lab: the sole remaining teeth are cross-lab.
+        att = {"model": "reviewer-model", "verdict": "pass",
+               "artifact_shas": [a["sha256"]]}
         claim = {"id": "c1", "risk_tier": "critical", "rung": 1, "method": "single",
                  "context": "independent", "verdict": "pass", "artifacts": [a],
                  "attestation": att}
@@ -669,10 +672,12 @@ class QualifierCase(unittest.TestCase):
     model/lab that differs from the producer's, verdict=pass): presence, not
     authenticity, the same S1 residual as before.
 
-    These claims are rung 0 with no artifacts, so no artifact I/O occurs and the
-    bundle-dir base is never read; a throwaway tmp dir keeps parity with the
-    other cases without materializing files. min_rung is relaxed to 0 to isolate
-    the CONTEXT/qualifier checks from the rung/artifact/polarity checks."""
+    A required qualifier is also byte-bound: the attestation must carry
+    artifact_shas equal to the gate's verified capture hashes, so a happy-path
+    claim materializes a real capture and anchors to it. Structural-failure
+    claims stay artifact-free (the anchor reason is additive, so their specific
+    reason still fires). min_rung is relaxed to 0 to isolate the CONTEXT/qualifier
+    checks from the rung/artifact/polarity checks."""
 
     PRODUCER_MODEL = "prod-model-x"
     REVIEWER_MODEL = "other-model-y"
@@ -710,11 +715,22 @@ class QualifierCase(unittest.TestCase):
             "gaps": [],
         }
 
-    def cm_claim(self, ctx, att, tier="high"):
+    def cm_claim(self, ctx, att, tier="high", artifacts=None):
         c = {"id": "c1", "risk_tier": tier, "rung": 0, "context": ctx, "verdict": "pass"}
         if att is not None:
             c["attestation"] = att
+        if artifacts is not None:
+            c["artifacts"] = artifacts
         return c
+
+    def anchored_artifact(self, name="cap.txt", body="observed-bytes\n"):
+        """Write a real capture under the bundle base and return (artifact, sha).
+        A byte-bound qualifier needs the attestation's artifact_shas to equal the
+        gate's verified hashes, so happy-path attestations anchor to this sha."""
+        p = self.tmp / name
+        p.write_text(body)
+        sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        return {"id": "a1", "role": "stdout_capture", "uri": name, "sha256": sha}, sha
 
     def gate_cm(self, claim, producer_model=PRODUCER_MODEL, policy=None):
         return gate.gate(self.cm_bundle(claim, producer_model=producer_model),
@@ -722,17 +738,48 @@ class QualifierCase(unittest.TestCase):
 
     # --- cross-model happy paths --------------------------------------------
     def test_cross_model_single_reviewer_passes(self):
-        att = {"model": self.REVIEWER_MODEL, "verdict": "pass"}
-        r = self.gate_cm(self.cm_claim("independent", att))
+        art, sha = self.anchored_artifact()
+        att = {"model": self.REVIEWER_MODEL, "verdict": "pass", "artifact_shas": [sha]}
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]))
         self.assertEqual(r["verdict"], "pass", r["reasons"])
 
     def test_cross_model_panel_passes(self):
-        att = {"verdict": "pass", "panel": [
+        art, sha = self.anchored_artifact()
+        att = {"verdict": "pass", "artifact_shas": [sha], "panel": [
             {"model": "model-a", "verdict": "pass"},
             {"model": "model-b", "verdict": "pass"},
         ]}
-        r = self.gate_cm(self.cm_claim("independent", att))
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]))
         self.assertEqual(r["verdict"], "pass", r["reasons"])
+
+    # --- the qualifier must be byte-bound to THESE captures -----------------
+    def test_cross_model_unanchored_blocks_additively(self):
+        """A structurally-valid reviewer whose attestation omits artifact_shas is
+        not byte-bound: the qualifier blocks, and the reason is additive (the
+        reviewer checks are not short-circuited)."""
+        art, _sha = self.anchored_artifact()
+        att = {"model": self.REVIEWER_MODEL, "verdict": "pass"}  # no artifact_shas
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]))
+        self.assertEqual(r["verdict"], "block")
+        self.assertTrue(any("not byte-bound" in x for x in r["reasons"]), r["reasons"])
+
+    def test_cross_model_forged_binding_blocks(self):
+        """artifact_shas present but not equal to the verified hashes (a verdict
+        transplanted from another bundle) does not anchor."""
+        art, _sha = self.anchored_artifact()
+        att = {"model": self.REVIEWER_MODEL, "verdict": "pass",
+               "artifact_shas": ["0" * 64]}
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]))
+        self.assertEqual(r["verdict"], "block")
+        self.assertTrue(any("not byte-bound" in x for x in r["reasons"]), r["reasons"])
+
+    def test_cross_model_empty_anchor_does_not_clear(self):
+        """An empty artifact_shas binds the verdict to no bytes; with a zero-artifact
+        claim both sides would be the empty set, so an empty anchor must NOT pass."""
+        att = {"model": self.REVIEWER_MODEL, "verdict": "pass", "artifact_shas": []}
+        r = self.gate_cm(self.cm_claim("independent", att))  # no artifacts either
+        self.assertEqual(r["verdict"], "block")
+        self.assertTrue(any("not byte-bound" in x for x in r["reasons"]), r["reasons"])
 
     # --- the qualifier needs an independent context -------------------------
     def test_cross_model_author_context_blocks(self):
@@ -792,9 +839,21 @@ class QualifierCase(unittest.TestCase):
 
     # --- cross-lab qualifier ------------------------------------------------
     def test_cross_lab_qualifier_passes(self):
-        att = {"lab": "other-lab", "verdict": "pass"}
-        r = self.gate_cm(self.cm_claim("independent", att), policy=self.LAB_POLICY)
+        art, sha = self.anchored_artifact()
+        att = {"lab": "other-lab", "verdict": "pass", "artifact_shas": [sha]}
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]),
+                         policy=self.LAB_POLICY)
         self.assertEqual(r["verdict"], "pass", r["reasons"])
+
+    def test_cross_lab_unanchored_blocks(self):
+        """A structurally-valid cross-lab attestation that omits artifact_shas is
+        not byte-bound: it blocks even though the lab differs and verdict=pass."""
+        art, _sha = self.anchored_artifact()
+        att = {"lab": "other-lab", "verdict": "pass"}  # no artifact_shas
+        r = self.gate_cm(self.cm_claim("independent", att, artifacts=[art]),
+                         policy=self.LAB_POLICY)
+        self.assertEqual(r["verdict"], "block")
+        self.assertTrue(any("not byte-bound" in x for x in r["reasons"]), r["reasons"])
 
     def test_cross_lab_same_lab_blocks(self):
         att = {"lab": "example-lab", "verdict": "pass"}  # == producer lab

@@ -225,6 +225,24 @@ def _cross_model_reasons(cid, tier, att, producer_model) -> list:
     return out
 
 
+def _qualifier_anchored(att, verified_sha_set) -> bool:
+    """A cross-model / cross-lab qualifier is byte-bound to THIS bundle only when
+    the attestation carries artifact_shas whose SET equals the gate's own verified
+    artifact hashes. An empty artifact_shas (or an empty verified set) never
+    anchors: a verdict bound to no bytes is not bound. This defeats transplanting
+    an independent verdict onto a different bundle."""
+    if not isinstance(att, dict):
+        return False
+    shas = att.get("artifact_shas")
+    if not isinstance(shas, list) or not shas:
+        return False
+    if any(not isinstance(s, str) for s in shas):
+        return False
+    if not verified_sha_set:
+        return False
+    return set(shas) == verified_sha_set
+
+
 def validate_policy(policy: dict) -> None:
     """Fail closed: a policy that can't be trusted to enforce is an error."""
     if not isinstance(policy, dict):
@@ -359,22 +377,9 @@ def gate(bundle: dict, policy: dict, base: pathlib.Path) -> dict:
         req = require_context.get(tier)
         if req and RANK.get(ctx, -1) < RANK[req]:
             reasons.append(f"{cid}: tier {tier} requires context >= {req}, got {ctx}")
-        if tier in require_cross_model:
-            if ctx != "independent":
-                reasons.append(f"{cid}: tier {tier} requires a cross-model qualifier, "
-                               f"which needs context=independent (got {ctx})")
-            else:
-                reasons.extend(_cross_model_reasons(cid, tier, att, producer_model))
-        if tier in require_cross_lab:
-            if ctx != "independent":
-                reasons.append(f"{cid}: tier {tier} requires a cross-lab qualifier, "
-                               f"which needs context=independent (got {ctx})")
-            elif not isinstance(att, dict) or att.get("lab") in (None, producer_lab) \
-                    or att.get("verdict") != "pass":
-                reasons.append(
-                    f"{cid}: tier {tier} needs a cross-lab attestation "
-                    f"(lab present and != {producer_lab!r}, verdict=pass)"
-                )
+        # cross-model / cross-lab qualifiers are checked in (5b), after artifact
+        # integrity, because a required qualifier must be byte-bound to the
+        # captures the gate itself verified.
         if tier in require_method and method != require_method[tier]:
             reasons.append(f"{cid}: tier {tier} requires method={require_method[tier]}, got {method}")
 
@@ -426,6 +431,39 @@ def gate(bundle: dict, policy: dict, base: pathlib.Path) -> dict:
                 )
                 continue
             verified_shas.setdefault(a.get("role"), []).append(actual)
+
+        # (5b) qualifier byte-anchoring. A required cross-model / cross-lab
+        #      qualifier needs context=independent AND its structural presence in
+        #      the attestation AND that the attestation is byte-bound to THESE
+        #      captures (artifact_shas == the verified hashes). The anchor reason
+        #      is ADDITIVE: the structural reviewer/lab reasons stand on their own,
+        #      so an unanchored attestation still reports why it fell short.
+        verified_sha_set = {s for shas in verified_shas.values() for s in shas}
+        if tier in require_cross_model:
+            if ctx != "independent":
+                reasons.append(f"{cid}: tier {tier} requires a cross-model qualifier, "
+                               f"which needs context=independent (got {ctx})")
+            else:
+                reasons.extend(_cross_model_reasons(cid, tier, att, producer_model))
+                if not _qualifier_anchored(att, verified_sha_set):
+                    reasons.append(f"{cid}: tier {tier} cross-model qualifier is not "
+                                   f"byte-bound (attestation.artifact_shas must equal "
+                                   f"the verified capture hashes)")
+        if tier in require_cross_lab:
+            if ctx != "independent":
+                reasons.append(f"{cid}: tier {tier} requires a cross-lab qualifier, "
+                               f"which needs context=independent (got {ctx})")
+            else:
+                if not isinstance(att, dict) or att.get("lab") in (None, producer_lab) \
+                        or att.get("verdict") != "pass":
+                    reasons.append(
+                        f"{cid}: tier {tier} needs a cross-lab attestation "
+                        f"(lab present and != {producer_lab!r}, verdict=pass)"
+                    )
+                if not _qualifier_anchored(att, verified_sha_set):
+                    reasons.append(f"{cid}: tier {tier} cross-lab qualifier is not "
+                                   f"byte-bound (attestation.artifact_shas must equal "
+                                   f"the verified capture hashes)")
 
         # (6) differential well-formedness (the enforceable METHOD), with
         #     invariance polarity decided by the VERIFIED capture bytes (not the

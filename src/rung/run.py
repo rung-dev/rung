@@ -185,6 +185,10 @@ def _parse(opts: list[str]) -> argparse.Namespace:
                    help="Declared verdict (default pass). fail/blocked lower trust; the gate decides ship/no-ship.")
     p.add_argument("--claim", default=None, help="Human description of the claim.")
     p.add_argument("--lab", default="local", help="Producing lab/org (change.producer.lab).")
+    p.add_argument("--model", default=None,
+                   help="Model that produced the change, recorded verbatim as "
+                        "change.producer.model (no default, no normalization, no network). "
+                        "Omitted entirely when not given.")
     p.add_argument("--repo", default=None, help="Human description of the surface under change.")
     p.add_argument("--stdin", default=None, help="File fed to the probe's stdin (else /dev/null).")
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
@@ -240,6 +244,16 @@ def _parse(opts: list[str]) -> argparse.Namespace:
                         "gate. Does not mutate. Heuristic -- a clean scan is not proof of a clean capture.")
     p.add_argument("--no-gate", action="store_true", help="Emit the bundle but do not run the gate.")
     return p.parse_args(opts)
+
+
+def _producer(ns) -> dict:
+    """change.producer for the emitted bundle. --model is optional and verbatim:
+    without it the key is absent (never null), so the producer shape is unchanged
+    for anyone who does not name a model."""
+    producer = {"agent": "rung-run", "lab": ns.lab}
+    if ns.model is not None:
+        producer["model"] = ns.model
+    return producer
 
 
 def _scrubbed_env():
@@ -889,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
                 "repo": ns.repo or f"driven via rung run: {probe[0]}",
                 "s0": "n/a (single-run witness, no baseline)",
                 "s1": f"working tree / as-invoked: {probe_str}",
-                "producer": {"agent": "rung-run", "lab": ns.lab},
+                "producer": _producer(ns),
             },
             "claims": [{
                 "id": "c1",
@@ -1147,7 +1161,7 @@ def _run_diff(ns, probe, stdin_bytes, env, policy, policy_sha, policy_file) -> i
             "repo": ns.repo or f"driven via rung run --diff: {s0_argv[0]}",
             "s0": (f"cwd={ns.s0_cwd}: " if ns.s0_cwd else "") + s0_str,
             "s1": (f"cwd={ns.s1_cwd}: " if ns.s1_cwd else "") + s1_str,
-            "producer": {"agent": "rung-run", "lab": ns.lab},
+            "producer": _producer(ns),
         },
         "claims": [{
             "id": "c1",

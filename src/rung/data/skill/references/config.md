@@ -48,11 +48,16 @@ installed package ships its own copy as package data):
   qualifier**. A required qualifier needs `context: independent` **and** a
   structural attestation: `change.producer.model` is set, and the `attestation`
   names >= 1 reviewer model (via `model` or `panel[]`), each a non-empty string
-  differing from `change.producer.model`, each `verdict: pass`.
+  differing from `change.producer.model`, each `verdict: pass`. The attestation
+  must also be **byte-bound**: `attestation.artifact_shas` (a non-empty set) must
+  equal the gate's own re-verified artifact hashes, so a verdict cannot be
+  transplanted onto a different bundle. `rung attest`, run where the review
+  happened, records this; an unbound attestation blocks here.
 - `require_cross_lab` (array, optional): tiers that demand a **cross-lab
   qualifier**. A required qualifier needs `context: independent` **and** an
   `attestation` whose `lab` is present and differs from `change.producer.lab`,
-  `verdict: pass`.
+  `verdict: pass`, and is byte-bound the same way (`artifact_shas` set-equal to
+  the re-verified hashes).
 - `require_method` (object, optional): a per-tier **exact** required method
   (tier → one of `single`|`differential`|`adversarial`|`fuzz`|`property`). This is
   equality, **not** a floor. Methods are unordered, so requiring `single` at a
@@ -145,7 +150,9 @@ The gate reads only a subset of the schema when deciding a verdict.
   when `method: differential`); `attestation.lab`/`attestation.verdict` (required
   when policy demands a cross-lab qualifier for the tier);
   `attestation.model`/`attestation.panel[]` plus `change.producer.model` (required
-  when policy demands a cross-model qualifier for the tier).
+  when policy demands a cross-model qualifier for the tier);
+  `attestation.artifact_shas` (required to be byte-bound when policy demands
+  either qualifier for the tier).
 - Conditional, beyond the schema: `rung 1` (observed) requires >= 1 artifact;
   `method: differential` requires `rung 1` and **exactly one** `s0_capture` and
   **one** `s1_capture` (zero, duplicate, or padded captures block) plus a
@@ -153,7 +160,9 @@ The gate reads only a subset of the schema when deciding a verdict.
   cross-lab-qualifier tier requires a matching attestation on an independent
   context; a cross-model-qualifier tier requires an independent context and an
   attestation naming >= 1 reviewer model != `change.producer.model`, each
-  `verdict: pass`.
+  `verdict: pass`. Both qualifiers also require the attestation to be byte-bound:
+  a non-empty `attestation.artifact_shas` whose set equals the gate's re-verified
+  artifact hashes.
 - Gaps: `severity`, `dismissed` (an undismissed `blocker` gap blocks unless
   policy allows dismissal).
 
@@ -164,7 +173,8 @@ The gate reads only a subset of the schema when deciding a verdict.
   demanded; then it is enforced).
 - `claim.claim`, `claim.surface.*`, `claim.how_established`.
 - `artifact.media`/`summary`, `differential.probe`/`observed_delta`,
-  `attestation.judge_id`/`note`, `gap.why_unverified`.
+  `attestation.judge_id`/`note`, `attestation.artifact_shas_note` (the fixed
+  disclosure recorded when a reviewer had no artifact access), `gap.why_unverified`.
 - The advisory methods (`adversarial`/`fuzz`/`property`) are recorded but never
   gated: there is no mechanical anchor to enforce them.
 - `id` and `gap.desc` are advisory too, but appear in the gate's human-readable
