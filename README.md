@@ -269,11 +269,11 @@ reviewer's call; rung's job is making the check itself accountable.
 - **Container.** A pinned image is published to GHCR on each release; its exit
   code is the gate verdict, so it drops into any runner that can pull an image:
   ```bash
-  docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.5.1 gate bundle.json
+  docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.6.0 gate bundle.json
   ```
 - **GitHub Actions.** Gate a bundle with no install step via the published
   [action](https://github.com/marketplace/actions/rung-gate)
-  (`uses: rung-dev/rung@v0.5.1`); it fails the build on anything but exit 0.
+  (`uses: rung-dev/rung@v0.6.0`); it fails the build on anything but exit 0.
 - **From a checkout**, no install, with `src/` on the path:
   ```bash
   PYTHONPATH=src python3 -m rung.cli gate bundle.json   # same as: rung gate ...

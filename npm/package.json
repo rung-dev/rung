@@ -1,6 +1,6 @@
 {
   "name": "rung-ai",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Did your AI agent run what it says it verified, or only claim it did? rung turns an agent's verification into a record you can re-check. (npm entry currently redirects to the pip / pipx / uv / Homebrew / container install.)",
   "keywords": [
     "ai",

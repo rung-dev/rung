@@ -20,7 +20,7 @@ var msg = [
   "  Or run it with no install:",
   "",
   "    uvx --from rung-ai rung gate bundle.json",
-  "    docker run --rm -v \"$PWD:/w\" -w /w ghcr.io/rung-dev/rung:0.5.1 gate bundle.json",
+  "    docker run --rm -v \"$PWD:/w\" -w /w ghcr.io/rung-dev/rung:0.6.0 gate bundle.json",
   "",
   "  Docs:  https://github.com/rung-dev/rung",
   "  Site:  https://rung-dev.github.io",

@@ -45,10 +45,10 @@ Run it with no install:
 
 ```bash
 uvx --from rung-ai rung gate bundle.json
-docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.5.1 gate bundle.json
+docker run --rm -v "$PWD:/w" -w /w ghcr.io/rung-dev/rung:0.6.0 gate bundle.json
 ```
 
-Gate a bundle in CI with the published [GitHub Action](https://github.com/marketplace/actions/rung-gate) (`uses: rung-dev/rung@v0.5.1`); it fails the build on anything but exit 0.
+Gate a bundle in CI with the published [GitHub Action](https://github.com/marketplace/actions/rung-gate) (`uses: rung-dev/rung@v0.6.0`); it fails the build on anything but exit 0.
 
 ## Learn more
 

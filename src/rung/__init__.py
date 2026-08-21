@@ -7,6 +7,6 @@ the single source of truth for the package version (read dynamically by the
 build backend); it is distinct from what `rung version` prints (schema major +
 gate sha256 + resolved paths)."""
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = ["__version__"]
