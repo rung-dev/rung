@@ -220,6 +220,37 @@ rung isn't any of those, and doesn't replace them:
 
 **Most tools grade your work. rung grades whether the check was real.**
 
+## How rung is different
+
+No single tool sits where rung sits. Each piece exists somewhere else; the
+combination is the new part.
+
+- **Build-provenance attestation (SLSA, in-toto)** records how an artifact was
+  *built*, and by whom, and signs it. rung records how a change was *verified*
+  and how real that verification was: rung 0 (reasoned) vs rung 1 (drove the real
+  surface). Build origin is a different fact from run-realness. rung's
+  independence layer is a lighter, unsigned cousin of an in-toto threshold, and
+  leaves signing and identity to that ecosystem on purpose.
+- **A policy engine** is also deterministic and offline, so the gate engine
+  itself is not the novel part. What a general policy engine has no vocabulary for
+  is *did a real run happen, and was it byte-captured*. rung supplies that
+  vocabulary, the `rung run` byte-witness, and artifact re-hashing, then gates on
+  them.
+- **A test reporter** says a suite passed. It has no axis for whether the *real*
+  surface was driven (rung 0 vs 1), and no notion of who checked. Green CI on a
+  suite that never touches the real thing is still rung 0.
+- **Eval harnesses and benchmarks** score output quality with a model or a
+  scorer. rung makes no quality judgment, runs no model, and touches no network:
+  it records a portable, per-change proof that a real run happened and gates it
+  offline. Running the real thing is ordinary practice; the re-checkable
+  per-change record is the part missing elsewhere.
+
+The gap rung fills is the *intersection*: run-realness (rung 0 vs 1) × who
+checked × a portable per-change record × an offline, no-crypto, agent-loop-native
+gate. The independence angle it leans hardest on, **a different model, run blind,
+re-deriving the verdict from the captured bytes**, is the corner no neighbor
+occupies.
+
 ## What rung doesn't claim
 
 rung checks that the work was **shown**: that a real run happened and is recorded so anyone
